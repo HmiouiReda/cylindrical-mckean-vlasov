@@ -106,7 +106,8 @@ independently from the same distribution.
 The experiments consider two target functionals.
 
 ### Moment functional
-$$
+
+```math
 V_{\mathrm{mom}}(x,\mu)
 =
 \langle x,m_1(\mu)\rangle
@@ -114,10 +115,11 @@ V_{\mathrm{mom}}(x,\mu)
 \operatorname{tr}\!\bigl(\operatorname{Cov}(\mu)\bigr)
 +
 \sin(x_1).
-$$
+```
 
 ### Quantile/tail functional
-$$
+
+```math
 V_{\mathrm{quant}}(x,\mu)
 =
 x\left(q_{0.75}(\mu)-q_{0.25}(\mu)\right)
@@ -125,14 +127,16 @@ x\left(q_{0.75}(\mu)-q_{0.25}(\mu)\right)
 F_\mu(0)
 +
 \sin(x).
-$$
+```
 
-Here, $q_{0.75}-q_{0.25}$ is the interquartile range and $F_\mu(0)$
-is the conditional probability of being below zero. This target is not
-determined by a finite collection of ordinary moments and is particularly
-informative for the bimodal double-well benchmark.
-Both experiments use the same Fourier representation of the measure; only
-the regression target supplied to the cylindrical network changes.
+Here, $q_{0.75}(\mu)-q_{0.25}(\mu)$ is the interquartile range and
+$F_\mu(0)$ is the conditional probability of being below zero. This
+target is not, in general, determined by any fixed finite collection of
+ordinary moments and is particularly informative for the bimodal
+double-well benchmark.
+
+Both experiments use the same Fourier representation of the measure;
+only the regression target supplied to the cylindrical network changes.
 
 
 ## Results
