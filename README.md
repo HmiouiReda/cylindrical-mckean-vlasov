@@ -16,17 +16,20 @@ a truncated signature of the time-augmented common-noise path, a
 mixture-density network approximating the conditional law, and a
 cylindrical network evaluating the target functional:
 
-$$
-\widehat V(x,\mu_0,\mathbf w)
+```math
+\widehat{V}(x,\mu_0,\mathbf{w})
 =
-\Psi\!\left(
+\Psi\left(
 x,
 \left\langle
 \varphi,
-\widehat N\!\left(E_L(\mu_0),S_M(\mathbf w_{[0,t]})\right)
+\widehat{N}\left(
+E_L(\mu_0),
+S_M(\mathbf{w}_{[0,t]})
+\right)
 \right\rangle
 \right).
-$$
+```
 
 This repository implements and evaluates this architecture on four
 benchmarks.
