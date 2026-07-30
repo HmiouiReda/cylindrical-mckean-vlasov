@@ -112,7 +112,7 @@ V_{\mathrm{mom}}(x,\mu)
 =
 \langle x,m_1(\mu)\rangle
 +
-\operatorname{tr}\!\bigl(\operatorname{Cov}(\mu)\bigr)
+\mathrm{tr}\!\left(\mathrm{Cov}(\mu)\right)
 +
 \sin(x_1).
 ```
@@ -137,7 +137,6 @@ double-well benchmark.
 
 Both experiments use the same Fourier representation of the measure;
 only the regression target supplied to the cylindrical network changes.
-
 
 ## Results
 
@@ -194,8 +193,8 @@ the effect of conditional-law approximation, together with the training
 and regression error of the cylindrical network.
 
 The empirical, MDN and oracle networks have the same architecture, but are
-trained independently. They use the same target functional and separately
-selected evaluation points $x$.
+trained independently. They use the same target functional and evaluation points $x$ sampled
+independently from the same distribution.
 
 ![Measure-representation comparison](docs/results/ou_measure_representations.png)
 
@@ -232,10 +231,10 @@ $M=300$ scenarios, $N=2000$ particles and 200 time steps:
 |---|---:|
 | Itô Euler–Maruyama vs corrected Stratonovich Heun | **0.0045** |
 | Itô Euler–Maruyama vs naive Stratonovich Heun | **0.0494** |
-| Monte Carlo resolution | 0.0136 |
+| Estimated Monte Carlo resolution | 0.0136 |
 
 The corrected Heun scheme agrees with the Itô discretization below the
-Monte Carlo resolution, whereas omitting the drift correction produces a
+estimated Monte Carlo resolution, whereas omitting the drift correction produces a
 clearly measurable discrepancy.
 
 
