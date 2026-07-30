@@ -1,0 +1,19 @@
+
+# Virtual environments
+.Mckean/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+
+
+# IDE / OS
+.vscode/
+
+# Experiment outputs
+outputs/*
+
+
+

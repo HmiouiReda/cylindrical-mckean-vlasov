@@ -1,0 +1,15 @@
+  {
+  "benchmark": {
+    "T": 1.0, "n_steps": 200, "a": 1.0, "sigma": 0.3, "nu": 0.4, "beta": 0.8,
+    "m0_range": [-1.0, 1.0], "s0_range": [0.2, 0.6], "n_ref": 2000
+  },
+  "run": {
+    "M": 4000, "N": 200, "sig_level": 3, "J": 5, "k_keep": 64,
+    "mdn_epochs": 400, "psi_epochs": 350, "hidden": 128,
+    "S_quant": 2048, "batch": 256, "lr": 0.001, "k_x": 16
+  },
+  "run_quick": {
+    "M": 1200, "N": 120, "n_steps": 100, "n_ref": 600,
+    "mdn_epochs": 150, "psi_epochs": 150, "hidden": 96, "S_quant": 1024
+  }
+}
