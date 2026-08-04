@@ -55,6 +55,34 @@ class Benchmark(ABC):
         available, N_ref empirical otherwise.  -> (B, 2P)."""
         raise NotImplementedError
 
+    # Regression measurement layer.  Closed-form benchmarks can use the same
+    # exact law for both the measure-channel input and the regression target.
+    # Empirical-reference benchmarks override these methods so that the two
+    # quantities are computed from independent reference replicates.
+    def oracle_fourier(self, data: dict, freqs) -> "np.ndarray":
+        """Best available measure-channel integrals for the reference baseline."""
+        return self.ref_fourier(data, freqs)
+
+    def target_quantiles(self, data: dict, probs: np.ndarray) -> np.ndarray:
+        """Quantiles used to form regression targets."""
+        return self.ref_quantiles(data, probs)
+
+    def target_moments(self, data: dict) -> tuple[np.ndarray, np.ndarray]:
+        """Moments used to form regression targets."""
+        return self.ref_moments(data)
+
+    def target_cdf0(self, data: dict) -> np.ndarray:
+        """CDF value used to form regression targets."""
+        return self.ref_cdf0(data)
+
+    def independent_target_pair(self, data: dict, functional: str):
+        """Two independent estimates of the target statistics, when available.
+
+        Used only to estimate the irreducible reference-noise floor.  Exact-law
+        benchmarks return None.
+        """
+        return None
+
     def ref_label(self) -> str:
         return "reference law"
 

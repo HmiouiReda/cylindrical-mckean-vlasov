@@ -25,8 +25,9 @@ from benchmarks import PARAMS, get_benchmark
 from features import (FREQS, FREQS2D, Scaler, build_features,
                       sig_dim)
 from mdn import MDN, train_mdn
-from cylindrical import (Psi, empirical_fourier,
-                         make_psi_inputs, psi_dataset, train_regressor)
+from cylindrical import (Psi,attach_integrals,empirical_fourier,
+            mdn_integrals,psi_xy,train_regressor,V_target,
+            V_target_nd,V_target_quantile,psi_dataset,make_psi_inputs)
 from evaluate import (make_baseline_figure,make_figures,relative_l2,
                       sw2_mc_floor,sw2_mdn_vs_ref,w2_mc_floor,w2_mdn_vs_ref)
 
@@ -312,22 +313,44 @@ def main():
     assert not (args.functional == "quantile" and benchmark.d > 1), \
         "the quantile functional is defined for d = 1"
 
-    def ref_pair(dd):
-        """Per-scenario reference values of the two functionals feeding V."""
+    def target_pair(dd):
+        """Statistics used to construct the regression labels.
+        For empirical-reference benchmarks, these come from reference B."""
         if args.functional == "quantile":
-            q = benchmark.ref_quantiles(dd, np.array([0.25, 0.75]))
-            return q[1] - q[0], benchmark.ref_cdf0(dd)
-        return benchmark.ref_moments(dd)
+            q = benchmark.target_quantiles(dd,np.array([0.25, 0.75]))
+            interquartile_range = q[1] - q[0]
+            cdf0 = benchmark.target_cdf0(dd)
+            return interquartile_range, cdf0
+        return benchmark.target_moments(dd)
 
-    def mk(F_s, d, kx):
-        f1, f2 = ref_pair(d)
-        return psi_dataset(mdn, F_s, d["XT"], f1, f2, kx, freqs_t, rng,
-                           empirical_targets=args.empirical_targets,
-                           functional=args.functional)
+    # Build x and y ONCE for each split.
+    # Every measure representation will use exactly the same x points and the
+    # same labels. Only the measure-channel integrals will change.
+    def shared_xy(dd, kx):
+        f1, f2 = target_pair(dd)
+        return psi_xy(dd["XT"],f1,f2,kx,rng,
+            functional=args.functional,empirical_targets=args.empirical_targets)
 
-    Xin_tr, y_tr = mk(F_tr, d_tr, run["k_x"])
-    Xin_va, y_va = mk(F_va, d_va, run["k_x"])
-    Xin_te, y_te = mk(F_te, d_te, 0)          # test: ALL particles
+    xy_tr = shared_xy(d_tr, run["k_x"])
+    xy_va = shared_xy(d_va, run["k_x"])
+    xy_te = shared_xy(d_te, 0)
+
+    def attach_three(ints_tr, ints_va, ints_te):
+        datasets = []
+
+        for integrals, xy in zip((ints_tr, ints_va, ints_te),
+            (xy_tr, xy_va, xy_te)):
+            x_tensor, y_tensor, k_effective = xy
+            X_psi = attach_integrals(x_tensor,integrals,k_effective)
+            datasets.append((X_psi, y_tensor))
+        return datasets
+
+    # MDN measure representations.
+    mdn_tr = mdn_integrals(mdn, F_tr, freqs_t)
+    mdn_va = mdn_integrals(mdn, F_va, freqs_t)
+    mdn_te = mdn_integrals(mdn, F_te, freqs_t)
+
+    ((Xin_tr, y_tr),(Xin_va, y_va),(Xin_te, y_te)) = attach_three(mdn_tr,mdn_va,mdn_te)
 
     psi = Psi(n_integrals=2 * len(freqs_np), hidden=run["hidden"],
               x_dim=benchmark.d)
@@ -349,14 +372,9 @@ def main():
     rel_emp = rel_orc = None
 
     def variant_sets(ints_fn):
-        out = []
-        for dd, kx in ((d_tr, run["k_x"]), (d_va, run["k_x"]), (d_te, 0)):
-            f1, f2 = ref_pair(dd)
-            ints = torch.as_tensor(ints_fn(dd), dtype=torch.float32)
-            out.append(make_psi_inputs(ints, dd["XT"], f1, f2, kx, rng,
-                                       empirical_targets=args.empirical_targets,
-                                       functional=args.functional))
-        return out
+        integrals = [torch.as_tensor(ints_fn(dd),
+                dtype=torch.float32) for dd in (d_tr, d_va, d_te)]
+        return attach_three(*integrals)
 
 
 
@@ -372,31 +390,90 @@ def main():
                         lr=run["lr"], seed=args.seed,show=False)
         rel_emp = relative_l2(psi_emp, Xe_te, ye_te)
 
-    if args.baselines == "full":
-        print("[comparisons] oracle integrals <phi, mu_T>")
+        if args.baselines == "full":
+            reference_baseline_label = ("oracle integrals" if benchmark.has_closed_form
+                                    else "independent-reference integrals")
 
-        def oracle_fourier(dd):
-            if benchmark.has_closed_form:
-                return benchmark.ref_fourier(dd, freqs_np)
-            return empirical_fourier(dd["X_ref"], freqs_np)
+            print(f"[comparisons] {reference_baseline_label} <phi, mu_T>")
 
-        (Xo_tr, yo_tr), (Xo_va, yo_va), (Xo_te, yo_te) = variant_sets(
-                                    oracle_fourier)
+            def oracle_fourier(dd):
+                return benchmark.oracle_fourier(dd,freqs_np)
 
-        psi_orc = Psi(n_integrals=2 * len(freqs_np),
-                    hidden=run["hidden"],x_dim=benchmark.d)
+            ((Xo_tr, yo_tr),(Xo_va, yo_va),(Xo_te, yo_te)) = variant_sets(oracle_fourier)
 
-        train_regressor(psi_orc,Xo_tr,yo_tr,Xo_va,yo_va,
-            epochs=run["psi_epochs"],batch_size=1024,lr=run["lr"],
-            seed=args.seed,show=False)
-        rel_orc = relative_l2(psi_orc, Xo_te, yo_te)
+            psi_orc = Psi(n_integrals=2 * len(freqs_np),hidden=run["hidden"],x_dim=benchmark.d)
+
+            train_regressor(psi_orc,Xo_tr,yo_tr,Xo_va,yo_va,epochs=run["psi_epochs"],batch_size=1024,
+                lr=run["lr"],seed=args.seed,show=False,)
+
+            rel_orc = relative_l2(psi_orc,Xo_te,yo_te)
 
     rel_full = relative_l2(psi, Xin_te, y_te)
+    functional_ref_floor = None
+
+    pair = benchmark.independent_target_pair(
+        d_te,
+        args.functional,
+    )
+
+    if pair is not None and not args.empirical_targets:
+        (a1, a2), (b1, b2) = pair
+
+        # Test uses every XT particle, so restore shape (M, N).
+        x_np = (
+            xy_te[0]
+            .numpy()
+            .reshape(d_te["XT"].shape)
+        )
+
+        if args.functional == "quantile":
+            y_a = V_target_quantile(
+                x_np,
+                a1[:, None],
+                a2[:, None],
+            )
+
+            y_b = V_target_quantile(x_np,b1[:, None],b2[:, None])
+
+        elif benchmark.d == 1:
+            y_a = V_target(x_np,a1[:, None],a2[:, None])
+            y_b = V_target(x_np,b1[:, None],b2[:, None])
+
+        else:
+            y_a = V_target_nd(x_np,a1[:, None, :],a2[:, None])
+            y_b = V_target_nd(x_np,b1[:, None, :],b2[:, None])
+
+        # 1/2 E[(Y_A - Y_B)^2] estimates the label-noise variance.
+        noise_rms = np.sqrt(0.5 * np.mean((y_a - y_b) ** 2))
+        # Same normalization as relative_l2 against labels B.
+        signal_rms = np.sqrt(np.mean(y_b ** 2))
+        functional_ref_floor = float(noise_rms / signal_rms)
+
+    def noise_adjusted(rel_error):
+        """Subtract the estimated label-noise variance in quadrature."""
+        if rel_error is None or functional_ref_floor is None:
+            return None
+        return float(np.sqrt(max(rel_error ** 2- functional_ref_floor ** 2,0.0)))
+
+    rel_emp_adjusted = noise_adjusted(rel_emp)
+    rel_full_adjusted = noise_adjusted(rel_full)
+    rel_orc_adjusted = noise_adjusted(rel_orc)
+
     pct = lambda v: "   --  " if v is None else f"{100 * v:6.2f}%"
     print("[L2] relative error of V-hat (test):")
     print(f"     empirical plug-in (N={N:4d})     : {pct(rel_emp)}")
     print(f"     MDN pipeline (ours)             : {pct(rel_full)}")
-    print(f"     oracle integrals                : {pct(rel_orc)}")
+    reference_baseline_label = ("oracle integrals" if benchmark.has_closed_form 
+                                else "independent-reference integrals")
+
+    print(f"     {reference_baseline_label:31s}: {pct(rel_orc)}")
+
+    if functional_ref_floor is not None:
+        print(f"irreducible reference-target floor: {100 * functional_ref_floor:.2f}%")
+        print("[L2] noise-adjusted error sqrt(max(observed^2 - floor^2, 0)):")
+        print(f"     empirical plug-in (N={N:4d})     : {pct(rel_emp_adjusted)}")
+        print(f"     MDN pipeline (ours)             : {pct(rel_full_adjusted)}")
+        print(f"     {reference_baseline_label:31s}: {pct(rel_orc_adjusted)}")
 
     # ---- figures + metrics ------------------------------------------------
     make_figures(outdir, benchmark, d_te, mdn, F_te, hist_mdn, hist_psi,
@@ -405,8 +482,7 @@ def main():
         make_baseline_figure(outdir, benchmark, {
             f"empirical plug-in ($N$={N})": rel_emp,
             "MDN pipeline (ours)": rel_full,
-            "oracle integrals": rel_orc,
-        })
+            reference_baseline_label: rel_orc})
 
     _f = lambda v: None if v is None else float(v)
     metrics = dict(
@@ -428,7 +504,14 @@ def main():
         rel_l2_empirical=_f(rel_emp), rel_l2_oracle=_f(rel_orc),
         sweep_kkeep=sweep_results,
         runtime_sec=round(time.time() - t0, 1),
-    )
+        reference_baseline_label=reference_baseline_label,
+        functional_reference_floor=(None if functional_ref_floor is None else float(functional_ref_floor)),
+        rel_l2_empirical_noise_adjusted=(None if rel_emp_adjusted is None else float(rel_emp_adjusted)),
+        rel_l2_mdn_noise_adjusted=(None if rel_full_adjusted is None else float(rel_full_adjusted)),
+        rel_l2_reference_noise_adjusted=(None if rel_orc_adjusted is None else float(rel_orc_adjusted)),
+        n_ref_per_replicate=(int(benchmark.p.n_ref) if hasattr(benchmark.p, "n_ref") else None),
+        n_ref_pooled=(2 * int(benchmark.p.n_ref) if hasattr(benchmark.p, "n_ref") else None))
+    
     with open(outdir / "metrics.json", "w") as f:
         json.dump(metrics, f, indent=2)
 

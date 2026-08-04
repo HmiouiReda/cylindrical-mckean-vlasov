@@ -38,7 +38,8 @@ class DoubleWellParams:
     sigma0: float = 0.25      # common-noise volatility
     m0_range: tuple = (-0.3, 0.3)   # near-symmetric start => both wells filled
     s0_range: tuple = (0.3, 0.6)
-    n_ref: int = 2000         # reference particles per scenario (validation)
+    n_ref: int = 2000         # particles in EACH independent reference replicate
+
 
 
 class DoubleWell(ParticleReferenceBenchmark):
@@ -48,29 +49,44 @@ class DoubleWell(ParticleReferenceBenchmark):
     def __init__(self, **kwargs):
         self.p = DoubleWellParams(**kwargs)
 
-    def simulate(self, M: int, N: int, rng: np.random.Generator) -> dict:
+    def simulate(self,M: int,N: int,rng: np.random.Generator) -> dict:
         p = self.p
         dt = p.T / p.n_steps
         sqdt = np.sqrt(dt)
-        n_tot = N + p.n_ref            # training + reference
+        n_a = p.n_ref
+        n_b = p.n_ref
 
+        # Scenario parameters shared by all three systems.
         m0 = rng.uniform(*p.m0_range, size=M)
         s0 = rng.uniform(*p.s0_range, size=M)
-        X = m0[:, None] + s0[:, None] * rng.standard_normal((M, n_tot))
 
+        # Training particle system.
+        X = (m0[:, None]+ s0[:, None] * rng.standard_normal((M, N)))
+        # Reference A: used only for the Fourier inputs.
+        XA = (m0[:, None]+ s0[:, None] * rng.standard_normal((M, n_a)))
+        # Reference B: used only for the regression targets.
+        XB = (m0[:, None]+ s0[:, None] * rng.standard_normal((M, n_b)))
         W0 = np.zeros((M, p.n_steps + 1))
 
+        def step(U: np.ndarray,dB: np.ndarray,dW0: np.ndarray,) -> np.ndarray:
+            # Each system computes its OWN empirical mean.
+            cond_mean = U.mean(axis=1, keepdims=True)
+            drift = (p.kappa * (U - U ** 3)+ p.theta * (cond_mean - U))
+            # Tamed Euler drift.
+            drift = drift / (1.0 + dt * np.abs(drift))
+            return (U+ drift * dt+ p.sigma * dB+ p.sigma0 * dW0)
+
         for k in range(p.n_steps):
-            dW0 = sqdt * rng.standard_normal((M, 1))      # COMMON : broadcast
-            dB = sqdt * rng.standard_normal((M, n_tot))   # IDIOSYNCRATIC
-            cond_mean = X.mean(axis=1, keepdims=True)
-            drift = p.kappa * (X - X ** 3) + p.theta * (cond_mean - X)
-            drift = drift / (1.0 + dt * np.abs(drift))    # taming (HJK 2012)
-            X = X + drift * dt + p.sigma * dB + p.sigma0 * dW0
+            # The common-noise increment is shared by all systems.
+            dW0 = sqdt * rng.standard_normal((M, 1))
+            # The idiosyncratic noises are independent.
+            X = step(X,sqdt * rng.standard_normal((M, N)),dW0)
+            XA = step(XA,sqdt * rng.standard_normal((M, n_a)),dW0)
+            XB = step(XB,sqdt * rng.standard_normal((M, n_b)),dW0)
             W0[:, k + 1] = W0[:, k] + dW0[:, 0]
 
         times = np.linspace(0.0, p.T, p.n_steps + 1)
-        return dict(m0=m0, s0=s0, W0=W0,
-                    XT=np.ascontiguousarray(X[:, :N]),
-                    X_ref=np.ascontiguousarray(X[:, N:]),
-                    times=times)
+
+        return {"m0": m0,"s0": s0,"W0": W0,"XT": np.ascontiguousarray(X),
+            "X_ref_input": np.ascontiguousarray(XA),"X_ref_target": np.ascontiguousarray(XB),
+            "X_ref": np.ascontiguousarray(np.concatenate([XA, XB], axis=1)),"times": times}
