@@ -20,6 +20,7 @@ import matplotlib.pyplot as plt
 
 from benchmarks.base import Benchmark
 from mdn import MDN
+from pathlib import Path
 
 
 # point where quantile integration is evaluated
@@ -355,3 +356,65 @@ def make_baseline_figure(outdir, benchmark: Benchmark, rel_errors: dict):
     plt.tight_layout()
     plt.savefig(f"{outdir}/fig5_baselines.png", dpi=130)
     plt.close()
+
+
+def make_convergence_figure(
+    outdir,
+    hist_mdn: dict,
+    hist_psi: dict,
+):
+    """Create a dedicated training-convergence figure.
+
+    Panel 1:
+        MDN train and validation NLL.
+
+    Panel 2:
+        Validation distributional error, usually W2.
+
+    Panel 3:
+        Validation relative L2 error of Psi.
+    """
+    fig, axes = plt.subplots(1, 3, figsize=(14, 3.8))
+
+    # MDN NLL.
+    mdn_epochs = np.arange(1, len(hist_mdn["train"]) + 1)
+
+    axes[0].plot(mdn_epochs, hist_mdn["train"], label="train")
+    axes[0].plot(mdn_epochs, hist_mdn["val"], label="validation")
+    axes[0].set_title("MDN NLL convergence")
+    axes[0].set_xlabel("epoch")
+    axes[0].set_ylabel("NLL")
+    axes[0].legend()
+
+    # Conditional-law W2.
+    if hist_mdn.get("eval_error"):
+        axes[1].plot(
+            hist_mdn["error_epoch"],
+            hist_mdn["eval_error"],
+            marker="o",
+        )
+
+    axes[1].set_title("Conditional-law error")
+    axes[1].set_xlabel("epoch")
+    axes[1].set_ylabel(r"validation $W_2$ / sliced $W_2$")
+
+    # Psi relative L2.
+    psi_epochs = np.arange(
+        1,
+        len(hist_psi["val_rel_l2"]) + 1,
+    )
+
+    axes[2].semilogy(
+        psi_epochs,
+        hist_psi["val_rel_l2"],
+    )
+    axes[2].set_title(r"$\Psi$ relative $L^2$ convergence")
+    axes[2].set_xlabel("epoch")
+    axes[2].set_ylabel(r"validation relative $L^2$")
+
+    fig.tight_layout()
+    fig.savefig(
+        Path(outdir) / "fig6_convergence.png",
+        dpi=140,
+    )
+    plt.close(fig)

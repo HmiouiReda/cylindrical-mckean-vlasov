@@ -24,7 +24,6 @@ from mdn import MDN
 
 
 
-
 # Fourier encodings of the MDN mixture and empirical particle measure
 def mixture_fourier(logits: torch.Tensor, mu: torch.Tensor,
                     sigma: torch.Tensor, freqs: torch.Tensor) -> torch.Tensor:
@@ -187,45 +186,104 @@ def psi_dataset(mdn: MDN, feats_std: torch.Tensor, XT: np.ndarray,
 
 
 # MSE training loop
-def train_regressor(model: nn.Module,
-                    X_tr: torch.Tensor, y_tr: torch.Tensor,
-                    X_va: torch.Tensor, y_va: torch.Tensor,
-                    epochs: int, batch_size: int, lr: float,
-                    seed: int = 0, log_every: int = 50, show: bool = True):
+def train_regressor(
+    model: nn.Module,
+    X_tr: torch.Tensor,
+    y_tr: torch.Tensor,
+    X_va: torch.Tensor,
+    y_va: torch.Tensor,
+    epochs: int,
+    batch_size: int,
+    lr: float,
+    seed: int = 0,
+    log_every: int = 50,
+    show: bool = True,
+):
     opt = torch.optim.Adam(model.parameters(), lr=lr)
-    sched = torch.optim.lr_scheduler.CosineAnnealingLR(opt, T_max=epochs,
-                                                       eta_min=lr * 1e-2)
-    crit = nn.MSELoss()
-    g = torch.Generator().manual_seed(seed)
-    n = X_tr.shape[0]
-    hist = {"train": [], "val": []}
-    best_val, best_state = float("inf"), None
-    for ep in range(1, epochs + 1):
-        model.train()
-        perm = torch.randperm(n, generator=g)
-        tot, cnt = 0.0, 0
-        for i in range(0, n, batch_size):
-            idx = perm[i:i + batch_size]
-            pred = model(X_tr[idx])                   # 1. forward
-            loss = crit(pred, y_tr[idx])              # 2. loss
-            opt.zero_grad()                           # 3. reset grads
-            loss.backward()                           # 4. backprop
-            opt.step()                                # 5. Adam update
-            tot += loss.item() * idx.shape[0]
-            cnt += idx.shape[0]
-        sched.step()
 
+    sched = torch.optim.lr_scheduler.CosineAnnealingLR(
+        opt,
+        T_max=epochs,
+        eta_min=lr * 1e-2,
+    )
+
+    criterion = nn.MSELoss()
+    generator = torch.Generator().manual_seed(seed)
+    n = X_tr.shape[0]
+
+    hist = {
+        "train": [],
+        "val": [],
+        "val_rel_l2": [],
+        "lr": [],
+    }
+
+    best_val = float("inf")
+    best_state = None
+    best_epoch = 0
+
+    for epoch in range(1, epochs + 1):
+        model.train()
+        permutation = torch.randperm(n, generator=generator)
+
+        total_loss = 0.0
+        total_count = 0
+
+        for start in range(0, n, batch_size):
+            idx = permutation[start:start + batch_size]
+            prediction = model(X_tr[idx])
+            loss = criterion(prediction, y_tr[idx])
+
+            opt.zero_grad()
+            loss.backward()
+            opt.step()
+
+            total_loss += loss.item() * idx.shape[0]
+            total_count += idx.shape[0]
+
+        sched.step()
         model.eval()
+
         with torch.no_grad():
-            va = crit(model(X_va), y_va).item()
-        hist["train"].append(tot / cnt)
-        hist["val"].append(va)
-        if va < best_val:
-            best_val = va
+            validation_prediction = model(X_va)
+            validation_mse = criterion(
+                validation_prediction,
+                y_va,
+            ).item()
+
+        train_mse = total_loss / total_count
+        target_square_mean = torch.mean(y_va.square()).item()
+
+        validation_relative_l2 = float(
+            np.sqrt(
+                validation_mse
+                / max(target_square_mean, 1e-30)
+            )
+        )
+
+        hist["train"].append(train_mse)
+        hist["val"].append(validation_mse)
+        hist["val_rel_l2"].append(validation_relative_l2)
+        hist["lr"].append(float(opt.param_groups[0]["lr"]))
+
+        if validation_mse < best_val:
+            best_val = validation_mse
+            best_epoch = epoch
             best_state = copy.deepcopy(model.state_dict())
-        if show and (ep % log_every == 0 or ep == 1):
-            print(f"    Psi epoch {ep:4d}/{epochs}  "
-                  f"MSE train {tot/cnt:.5f}  val {va:.5f}")
+
+        if show and (epoch % log_every == 0 or epoch == 1):
+            print(
+                f"    Psi epoch {epoch:4d}/{epochs}  "
+                f"MSE train {train_mse:.5f}  "
+                f"val {validation_mse:.5f}  "
+                f"rel L2 {validation_relative_l2:.4f}"
+            )
+
+    hist["best_epoch"] = best_epoch
+
+    if best_state is None:
+        raise RuntimeError("No valid Psi checkpoint was produced.")
 
     model.load_state_dict(best_state)
+
     return hist, best_val

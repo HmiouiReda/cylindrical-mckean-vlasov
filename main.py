@@ -22,19 +22,20 @@ import numpy as np
 import torch
 
 from benchmarks import PARAMS, get_benchmark
-from features import (FREQS, FREQS2D, Scaler, build_features,
-                      sig_dim)
+from features import (Scaler,build_features,make_freqs,sig_dim,)
 from mdn import MDN, train_mdn
 from cylindrical import (Psi,attach_integrals,empirical_fourier,
             mdn_integrals,psi_xy,train_regressor,V_target,
             V_target_nd,V_target_quantile,psi_dataset,make_psi_inputs)
-from evaluate import (make_baseline_figure,make_figures,relative_l2,
-                      sw2_mc_floor,sw2_mdn_vs_ref,w2_mc_floor,w2_mdn_vs_ref)
+from evaluate import (make_baseline_figure,make_convergence_figure,
+            make_figures,relative_l2,sw2_mc_floor,sw2_mdn_vs_ref,
+            w2_mc_floor,w2_mdn_vs_ref)
 
 # Global defaults; per-benchmark values live in configs/<benchmark>.json.
-DEFAULT_RUN = dict(M=4000, N=200, sig_level=2, J=5, k_keep=64,
-                   mdn_epochs=400, psi_epochs=350, hidden=128,
-                   S_quant=2048, batch=256, lr=1e-3, k_x=16)
+DEFAULT_RUN = {"M": 4000,"N": 200,"sig_level": 2,"n_fourier": 4,
+    "J": 5,"k_keep": 64,"mdn_depth": 2,"psi_depth": 2,"mdn_epochs": 400,
+    "psi_epochs": 350,"hidden": 128,"S_quant": 2048,"batch": 256,"lr": 1e-3,
+    "k_x": 16,"curve_every": 10,"curve_scenarios": 128,"curve_quantiles": 256}
 
 
 def get_args():
@@ -53,9 +54,16 @@ def get_args():
     p.add_argument("--N", type=int, default=0, help="particles per scenario")
     p.add_argument("--sig-level", type=int, default=0, choices=[0, 1, 2, 3])
     p.add_argument("--J", type=int, default=0, help="mixture components")
+    p.add_argument("--n-fourier",type=int,default=0,
+        help="number P of Fourier frequencies (2P sine/cosine features)")
+    p.add_argument("--mdn-depth",type=int,default=0,
+        help="number of hidden layers in the MDN trunk",)
+    p.add_argument("--psi-depth",type=int,default=0,
+        help="number of hidden layers in the cylindrical network Psi",)
+    p.add_argument("--lr",type=float,default=0.0,help="learning-rate override")
     p.add_argument("--kkeep", type=int, default=0,
-                   help="particles per scenario used in the NLL "
-                        "(gradient variance only)")
+                help="particles per scenario used in the NLL "
+                    "(gradient variance only)")
     p.add_argument("--mdn-epochs", type=int, default=0)
     p.add_argument("--psi-epochs", type=int, default=0)
     p.add_argument("--functional", type=str, default="moments",
@@ -103,9 +111,9 @@ def load_config(args):
         bench_fields = {f.name for f in dataclasses.fields(PARAMS[args.benchmark])}
         for k, v in cfg.get("run_quick", {}).items():
             (bench if k in bench_fields else run)[k] = v
-    for cli, key in [("M", "M"), ("N", "N"), ("J", "J"), ("kkeep", "k_keep"),
-                     ("sig_level", "sig_level"), ("mdn_epochs", "mdn_epochs"),
-                     ("psi_epochs", "psi_epochs")]:
+    for cli, key in [("M", "M"),("N", "N"),("J", "J"),("kkeep", "k_keep"),("sig_level", "sig_level"),
+                    ("n_fourier", "n_fourier"),("mdn_depth", "mdn_depth"),("psi_depth", "psi_depth"),
+                    ("mdn_epochs", "mdn_epochs"),("psi_epochs", "psi_epochs"),("lr", "lr"),]:
         v = getattr(args, cli)
         if v:
             run[key] = v
@@ -131,8 +139,10 @@ def main():
     print("=" * 72)
     print(f"Benchmark: {benchmark.pretty}  ({args.benchmark})")
     print(f"Config   : M={M} scenarios, N={N} particles, "
-          f"n={benchmark.p.n_steps} steps, sig level {run['sig_level']}, "
-          f"J={run['J']}, K_keep={run['k_keep']}, seed={args.seed}")
+        f"n={benchmark.p.n_steps} steps, sig level {run['sig_level']}, "
+        f"P={run['n_fourier']} Fourier frequencies, J={run['J']}, "
+        f"depths=({run['mdn_depth']},{run['psi_depth']}), "
+        f"K_keep={run['k_keep']}, seed={args.seed}")
     print("=" * 72)
 
 
@@ -168,13 +178,13 @@ def main():
 
     # ---- features + split + standardisation -------------------------------
     t = time.time()
-    feats = build_features(data, run["sig_level"])
+    freqs_np = make_freqs(run["n_fourier"], d=benchmark.d)
+    feats = build_features(data,run["sig_level"],freqs=freqs_np)
     F = feats.shape[1]
-    n_fourier = 2 * len(FREQS2D if benchmark.d == 2 else FREQS)
-    print(f"[features] dimension = {F} "
-        f"({n_fourier} Fourier + "
-        f"{sig_dim(run['sig_level'])} signature) "
-        f"in {time.time() - t:.1f}s")
+    n_fourier_features = 2 * len(freqs_np)
+
+    print(f"[features] dimension = {F} ({n_fourier_features} Fourier + "
+        f"{sig_dim(run['sig_level'])} signature) in {time.time() - t:.1f}s")
 
     perm = rng.permutation(M)
     n_tr, n_va = int(0.7 * M), int(0.15 * M)
@@ -208,14 +218,17 @@ def main():
     d_tr = benchmark.subset(data, itr)
     d_va = benchmark.subset(data, iva)
     d_te = benchmark.subset(data, ite)
-    def model_w2(model, feats_test, data_test):
-        """Use exact 1D W2 or sliced W2 according to the state dimension."""
-        if benchmark.d == 2:
-            return sw2_mdn_vs_ref(model,feats_test,benchmark,
-                        data_test,S=run["S_quant"])
+    def model_w2(model,feats_test,data_test,S=None):
+        """Use exact 1D W2 or sliced W2 depending on state dimension."""
+        if S is None:
+            S = run["S_quant"]
 
-        return w2_mdn_vs_ref( model,feats_test,benchmark,
-                             data_test,S=run["S_quant"])
+        if benchmark.d == 2:
+            return sw2_mdn_vs_ref(model,feats_test,
+                benchmark, data_test, S=S)
+
+        return w2_mdn_vs_ref(model, feats_test,
+            benchmark, data_test, S=S)
 
 
     def mc_w2_floor(data_test):
@@ -233,7 +246,8 @@ def main():
               f"({ep_sw} epochs per K)")
         for K in [int(s) for s in args.sweep_kkeep.split(",")]:
             torch.manual_seed(args.seed)          # same net init for each K
-            m_k = MDN(F, hidden=run["hidden"], J=run["J"],d=benchmark.d)
+            m_k= MDN(F,hidden=run["hidden"],J=run["J"],
+                            depth=run["mdn_depth"],d=benchmark.d)
             train_mdn(m_k, F_tr, X_tr, F_va, X_va, epochs=ep_sw,
                       batch_size=run["batch"], lr=run["lr"], k_keep=K,
                       seed=args.seed, show=False)
@@ -258,7 +272,7 @@ def main():
         print("\n[overfit-test] 50 scenarios, 4 FROZEN particles, 800 epochs "
               "-- the train NLL MUST collapse (otherwise: gradient-flow bug).")
         X_fix = X_tr[:50, :4].contiguous()   # FIXED set => memorisation possible
-        m_small = MDN(F, hidden=64, J=run["J"], d=benchmark.d)
+        m_small = MDN(F,hidden=64,J=run["J"],depth=run["mdn_depth"],d=benchmark.d)
         h, _ = train_mdn(m_small, F_tr[:50], X_fix, F_tr[:50], X_fix,
                          epochs=800, batch_size=50, lr=1e-3, k_keep=4,
                          seed=args.seed, log_every=200)
@@ -277,11 +291,26 @@ def main():
     print("\n[MDN] training "
         "(minimizing expected NLL is equivalent to minimizing conditional KL; "
         "unbiased gradients from a single trajectory)")
-    mdn = MDN(F, hidden=run["hidden"], J=run["J"], d=benchmark.d)
-    hist_mdn, best_nll = train_mdn(mdn, F_tr, X_tr, F_va, X_va,
-                                   epochs=run["mdn_epochs"],
-                                   batch_size=run["batch"], lr=run["lr"],
-                                   k_keep=run["k_keep"], seed=args.seed)
+    mdn = MDN(F,hidden=run["hidden"],J=run["J"],depth=run["mdn_depth"],d=benchmark.d)
+
+    # Fixed validation subset used only for the convergence curve.
+    n_curve = min(run["curve_scenarios"], len(iva))
+
+    # These indices are relative to the validation subset.
+    curve_idx = np.arange(n_curve)
+
+    F_curve = F_va[curve_idx]
+    d_curve = benchmark.subset(d_va, curve_idx)
+
+
+    def validation_distribution_error(model):
+        """Mean validation W2 on a small fixed subset."""
+        errors = model_w2(model,F_curve, d_curve,S=run["curve_quantiles"],)
+        return errors.mean()
+
+    hist_mdn, best_nll = train_mdn(mdn,F_tr,X_tr,F_va,X_va,epochs=run["mdn_epochs"],
+        batch_size=run["batch"],lr=run["lr"],k_keep=run["k_keep"],seed=args.seed,
+        eval_error_fn=validation_distribution_error,eval_every=run["curve_every"])
     mdn.eval()
     floor = benchmark.entropy_floor(data)
     msg = (f"(entropy floor 0.5 log(2 pi e v_T) = {floor:.4f})"
@@ -308,7 +337,6 @@ def main():
     # ---- cylindrical network Psi ------------------------------------------
     print("\n[Psi] closed-form <phi, mixture> integration + MSE training "
           "(MDN frozen)")
-    freqs_np = FREQS2D if benchmark.d == 2 else FREQS
     freqs_t = torch.as_tensor(freqs_np, dtype=torch.float32)
     assert not (args.functional == "quantile" and benchmark.d > 1), \
         "the quantile functional is defined for d = 1"
@@ -352,8 +380,8 @@ def main():
 
     ((Xin_tr, y_tr),(Xin_va, y_va),(Xin_te, y_te)) = attach_three(mdn_tr,mdn_va,mdn_te)
 
-    psi = Psi(n_integrals=2 * len(freqs_np), hidden=run["hidden"],
-              x_dim=benchmark.d)
+    psi = Psi(n_integrals=2 * len(freqs_np),hidden=run["hidden"],
+                depth=run["psi_depth"],x_dim=benchmark.d)
     hist_psi, _ = train_regressor(psi, Xin_tr, y_tr, Xin_va, y_va,
                                   epochs=run["psi_epochs"], batch_size=1024,
                                   lr=run["lr"], seed=args.seed)
@@ -383,8 +411,8 @@ def main():
               f"(N={N} particles per scenario)")
         (Xe_tr, ye_tr), (Xe_va, ye_va), (Xe_te, ye_te) = variant_sets(
             lambda dd: empirical_fourier(dd["XT"], freqs_np))
-        psi_emp = Psi(n_integrals=2 * len(freqs_np), hidden=run["hidden"],
-                      x_dim=benchmark.d)
+        psi_emp = Psi(n_integrals=2 * len(freqs_np),hidden=run["hidden"],
+                depth=run["psi_depth"],x_dim=benchmark.d,)
         train_regressor(psi_emp, Xe_tr, ye_tr, Xe_va, ye_va,
                         epochs=run["psi_epochs"], batch_size=1024,
                         lr=run["lr"], seed=args.seed,show=False)
@@ -401,7 +429,8 @@ def main():
 
             ((Xo_tr, yo_tr),(Xo_va, yo_va),(Xo_te, yo_te)) = variant_sets(oracle_fourier)
 
-            psi_orc = Psi(n_integrals=2 * len(freqs_np),hidden=run["hidden"],x_dim=benchmark.d)
+            psi_orc = Psi(n_integrals=2 * len(freqs_np),hidden=run["hidden"],
+                            depth=run["psi_depth"],x_dim=benchmark.d,)
 
             train_regressor(psi_orc,Xo_tr,yo_tr,Xo_va,yo_va,epochs=run["psi_epochs"],batch_size=1024,
                 lr=run["lr"],seed=args.seed,show=False,)
@@ -478,6 +507,7 @@ def main():
     # ---- figures + metrics ------------------------------------------------
     make_figures(outdir, benchmark, d_te, mdn, F_te, hist_mdn, hist_psi,
                  w2_model, w2_floor)
+    make_convergence_figure(outdir,hist_mdn,hist_psi)
     if args.baselines == "full":
         make_baseline_figure(outdir, benchmark, {
             f"empirical plug-in ($N$={N})": rel_emp,
@@ -514,6 +544,9 @@ def main():
     
     with open(outdir / "metrics.json", "w") as f:
         json.dump(metrics, f, indent=2)
+
+    with open(outdir / "training_history.json", "w") as file:
+        json.dump({"mdn": hist_mdn,"psi": hist_psi},file, indent=2)
 
     print("\n" + "=" * 72)
     print("SUMMARY")
