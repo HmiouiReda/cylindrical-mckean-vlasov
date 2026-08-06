@@ -95,4 +95,4 @@ class OrnsteinUhlenbeck(Benchmark):
 
     def entropy_floor(self, data: dict) -> float:
         # differential entropy of N(., v_T), averaged over scenarios
-        return float(0.5 * np.log(2 * np.pi * np.e * data["vT"].mean()))
+        return float(np.mean(0.5 * np.log(2 * np.pi * np.e * data["vT"])))

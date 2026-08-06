@@ -49,7 +49,7 @@ def dw_data():
 def test_dw_shapes_and_stability(dw_data):
     _, d = dw_data
     assert d["XT"].shape == (120, 40)
-    assert d["X_ref"].shape == (120, 400)
+    assert d["X_ref"].shape == (120, 800)
     assert np.isfinite(d["XT"]).all() and np.isfinite(d["X_ref"]).all()
 
 

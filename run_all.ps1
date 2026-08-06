@@ -60,12 +60,13 @@ foreach ($Candidate in $PythonCandidates) {
 
 $ModeName = if ($Quick) { "quick" } else { "full" }
 
-# Reproducibility and protection against excessive BLAS thread contention.
+# Reproducibility; let numerical libraries choose the CPU thread count.
 $env:PYTHONHASHSEED = "0"
-$env:OMP_NUM_THREADS = "2"
-$env:MKL_NUM_THREADS = "2"
-$env:OPENBLAS_NUM_THREADS = "2"
-$env:NUMEXPR_NUM_THREADS = "2"
+
+Remove-Item Env:OMP_NUM_THREADS -ErrorAction SilentlyContinue
+Remove-Item Env:MKL_NUM_THREADS -ErrorAction SilentlyContinue
+Remove-Item Env:OPENBLAS_NUM_THREADS -ErrorAction SilentlyContinue
+Remove-Item Env:NUMEXPR_NUM_THREADS -ErrorAction SilentlyContinue
 
 $HeadlineSeeds = @(0, 1, 2, 3, 4)
 $SweepSeeds = @(0, 1, 2)

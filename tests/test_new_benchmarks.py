@@ -22,7 +22,7 @@ def test_ito_stratonovich_correction():
 def test_multiplicative_simulation_sane():
     b = get_benchmark("multiplicative", n_steps=60, n_ref=200)
     d = b.simulate(30, 25, np.random.default_rng(1))
-    assert d["XT"].shape == (30, 25) and d["X_ref"].shape == (30, 200)
+    assert d["XT"].shape == (30, 25) and d["X_ref"].shape == (30, 400)
     assert np.isfinite(d["XT"]).all() and np.isfinite(d["X_ref"]).all()
     # bounded sigma0: nu (1 - beta) <= sigma0 <= nu (1 + beta)
     s0 = b.sigma0(np.linspace(-8, 8, 400))

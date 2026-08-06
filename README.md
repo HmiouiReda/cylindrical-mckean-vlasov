@@ -1,258 +1,174 @@
-# Cylindrical approximation of conditional laws — McKean–Vlasov with common noise
+# Cylindrical neural approximation of conditional laws for McKean–Vlasov equations with common noise
 
 ![Python](https://img.shields.io/badge/python-3.10%2B-blue)
 
-Companion code for
+Companion implementation for the 2026 manuscript by **Nacira Agram, Reda Hmioui, and Jan Rems**.
 
-> N. Agram, J. Rems, R. Hmioui, *Cylindrical approximation of conditional
-> laws for McKean–Vlasov equations with common noise*, preprint, 2026.
-
-The accompanying paper proves a universal approximation theorem for
-functionals $V(x,\mu_t)$ of the conditional law
-$\mu_t=\mathcal L(X_t\mid\mathcal F_t^{W^0})$
-of a McKean–Vlasov equation with common noise. The proposed factorized
-architecture combines finite-dimensional features of the initial law,
-a truncated signature of the time-augmented common-noise path, a
-mixture-density network approximating the conditional law, and a
-cylindrical network evaluating the target functional:
+The project approximates functionals of the conditional law
 
 ```math
-\widehat{V}(x,\mu_0,\mathbf{w})
-=
-\Psi\left(
-x,
-\left\langle
-\varphi,
-\widehat{N}\left(
-E_L(\mu_0),
-S_M(\mathbf{w}_{[0,t]})
-\right)
-\right\rangle
-\right).
+\mu_t=\mathcal L\!\left(X_t\mid\mathcal F_t^{W^0}\right)
 ```
 
-This repository implements and evaluates this architecture on four
-benchmarks.
+of a McKean–Vlasov equation with common noise. For a fixed evaluation time $t$, the frozen-common-noise law is written
 
-**No nested resimulation in the learned estimator.**
-A single terminal-particle observation per common-noise scenario gives an
-unbiased stochastic-gradient estimate of the conditional negative
-log-likelihood; using $K_{\mathrm{keep}}>1$ particles only reduces gradient
-variance. After training, the Fourier integrals of the predicted Gaussian
-mixture are computed analytically, so evaluating the cylindrical network
-requires neither a new particle simulation nor an inner Monte-Carlo loop.
-Particle systems are still used to generate training data and reference
-quantities for evaluation.
+```math
+\mu_t(\mathbf w)=\Phi_t\!\left(\mu_0,r_t\mathbf w\right),
+\qquad
+r_t\mathbf w:=\mathbf w\big|_{[0,t]}.
+```
+
+The restriction operator $r_t$ is essential: by causality, the conditional law at time $t$ and its signature features depend only on the common-noise rough path observed up to time $t$. The factorized architecture is
+
+```math
+\widehat V(x,\mu_0,\mathbf w)
+=
+\Psi\!\left(
+ x,
+ \left\langle\varphi,
+ \widehat N\!\left(g_M(\mu_0,r_t\mathbf w)\right)
+ \right\rangle
+\right),
+```
+
+with
+
+```math
+g_M(\mu_0,r_t\mathbf w)
+=
+\left(E_L(\mu_0),S_M(r_t\mathbf w)\right).
+```
+
+Here, $E_L(\mu_0)$ contains Fourier moments of the initial law and $S_M(r_t\mathbf w)$ is the truncated signature of the restricted, time-augmented geometric common-noise rough path. A mixture-density network (MDN) predicts a Gaussian-mixture approximation of $\Phi_t(\mu_0,r_t\mathbf w)$, and a cylindrical network evaluates the target functional through analytic integrals against the predicted mixture.
 
 ## Architecture
 
-![Pipeline architecture](docs/architecture/pipeline_architecture_overview.png)
+![Conditional cylindrical architecture with causal restriction](docs/architecture/pipeline_architecture_overview.png)
 
-The pipeline encodes the initial law and common-noise path, learns the
-conditional law with an MDN, and evaluates functionals through a
-cylindrical network.
+The common-noise branch first applies the causal restriction $r_t$, then computes $S_M(r_t\mathbf w)$. At inference time, Fourier integrals of the Gaussian mixture predicted by the MDN are evaluated analytically, so no new interacting particle system or inner Monte Carlo loop is required.
 
 ## Benchmarks
 
-The implementation includes four benchmarks covering exact Gaussian laws,
-nonlinear multimodal laws, state-dependent common noise, and a
-multidimensional state space.
-
-| Benchmark | Dimension | Reference law | Numerical scheme | Purpose |
+| Benchmark | Dimension | Initial law | Conditional-law reference | Main purpose |
 |---|---:|---|---|---|
-| `ou` | 1 | Exact conditional Gaussian law | Euler–Maruyama | Closed-form validation |
-| `double_well` | 1 | Large reference particle system `X_ref` | Tamed Euler | Nonlinear and potentially bimodal conditional laws |
-| `multiplicative` | 1 | Large reference particle system `X_ref` | Euler–Maruyama; Heun for the Itô–Stratonovich check | State-dependent common-noise coefficient |
-| `ou2d` | 2 | Exact two-dimensional Gaussian law | Euler–Maruyama | Multidimensional measure input and sliced Wasserstein evaluation |
+| `ou` | 1 | Gaussian | Exact Gaussian | Closed-form validation |
+| `ou_uniform` | 1 | Uniform | Exact uniform–Gaussian convolution | Non-Gaussian initial law |
+| `ou_gmm` | 1 | Two-component Gaussian mixture | Exact Gaussian mixture | Multimodal initial law |
+| `double_well` | 1 | Gaussian | Two independent reference systems | Nonlinear and potentially bimodal dynamics |
+| `multiplicative` | 1 | Gaussian | Two independent reference systems | State-dependent common noise |
+| `ou2d` | 2 | Gaussian | Exact correlated Gaussian | Multidimensional conditional law |
 
-The `double_well` and `multiplicative` benchmarks inherit the shared
-reference-particle implementation from `particle_ref.py`. The `ou` and
-`ou2d` benchmarks inherit directly from the common benchmark interface in
-`base.py`.
+All models use scalar common noise. The first three benchmarks share the same conditional OU dynamics and differ only through the initial-law family, isolating the role of the Fourier encoding.
 
-## Evaluation
+## Leakage-free reference design
 
-The conditional-law approximation is evaluated using:
+For `double_well` and `multiplicative`, no closed-form conditional law is available. Each scenario therefore uses two conditionally independent reference systems, A and B, sharing only $(\mu_0,W^0)$:
 
-- the Wasserstein distance $W_2$ in dimension one;
-- sliced $W_2$ in dimension two;
-- the Monte Carlo floor associated with an $N$-particle empirical cloud;
-- `reference_resolution` when the reference law is approximated by a finite
-  reference particle system;
-- the relative $L^2$ error of the cylindrical approximation $\widehat V$.
+- reference A supplies measure inputs to the independent-reference cylindrical baseline;
+- reference B supplies regression targets;
+- the pooled cloud $A\cup B$ is used only for law-level validation and density diagnostics.
 
-The experiments consider two target functionals:
+This prevents direct reuse of the same finite particle realization for both the measure representation and the regression target. Remaining finite-reference uncertainty is reported separately.
 
-1. a moment-based functional, available in dimensions one and two;
-2. a quantile/tail functional, available for the one-dimensional benchmarks.
+## Figures from the paper
 
-Their definitions are given in the [Target functionals](#target-functionals)
-section below.
+The five images below are the **exact PNG assets embedded in the current manuscript**, displayed in the same order as Figures 1–5 of the paper.
 
-The measure channel of the cylindrical network is evaluated using three
-representations:
+### Figure 1 — optimization diagnostics
 
-1. **Empirical plug-in:** Fourier integrals computed from the simulated
-   $N$-particle cloud;
-2. **MDN pipeline:** Fourier integrals computed analytically from the
-   predicted Gaussian mixture;
-3. **Oracle representation:** Fourier integrals computed from the exact
-   conditional law, when available, or from the large reference particle
-   system `X_ref`.
+![Figure 1 — OU–GMM training convergence](docs/results/training_convergence_ou_gmm.png)
 
-The three variants use the same target functional within each experiment,
-but they are trained separately and use evaluation points $x$ sampled
-independently from the same distribution.
+Representative optimization curves for the OU–GMM benchmark at seed 0: MDN training and validation NLL, validation conditional-law discrepancy, and downstream $\Psi$ relative $L^2$ error.
 
-## Target functionals
+### Figure 2 — conditional-law approximation
 
-The experiments consider two target functionals.
+![Figure 2 — law discrepancy across benchmarks](docs/results/law_error_across_benchmarks.png)
+
+Mean test law discrepancy for the MDN and the empirical $N=200$ particle cloud. Error bars are standard deviations across five independent seeds. The one-dimensional benchmarks use $W_2$, while `ou2d` uses sliced $W_2$.
+
+### Figure 3 — moment-functional approximation
+
+![Figure 3 — moment-functional error across benchmarks](docs/results/functional_error_across_benchmarks.png)
+
+Moment-functional relative $L^2$ error for the empirical, MDN, and exact/independent-reference measure channels. Error bars are standard deviations across five seeds.
+
+The functional is
+
+$$
+V_{\mathrm{mom}}(x,\mu) = \langle x,m_1(\mu)\rangle + \mathrm{tr} \left(\mathrm{Cov}(\mu)\right) + \sin(x_1).
+$$
+
+### Figure 4 — signature-depth sensitivity
+
+![Figure 4 — signature-depth sensitivity](docs/results/signature_depth_double_well.png)
+
+Double-well sensitivity to signature truncation. Both law and functional errors decrease materially from levels 1 to 3.
+
+### Figure 5 — Fourier-order sensitivity
+
+![Figure 5 — Fourier-order sensitivity](docs/results/fourier_sensitivity_non_gaussian.png)
+
+Fourier-order sensitivity for the two non-Gaussian OU benchmarks. The GMM family needs more than one positive frequency, whereas the uniform family is already stable at low order.
+
+## Headline numerical results
+
+### Conditional-law approximation
+
+| Benchmark | Validation NLL | MDN discrepancy | Empirical `N=200` | Reference resolution |
+|---|---:|---:|---:|---:|
+| OU–Gaussian | 0.2951 ± 0.0045 | **0.0057 ± 0.0008** | 0.0511 ± 0.0008 | Exact |
+| OU–uniform | 0.2187 ± 0.0033 | **0.0054 ± 0.0008** | 0.0450 ± 0.0005 | Exact |
+| OU–GMM | 0.3642 ± 0.0023 | **0.0082 ± 0.0009** | 0.0550 ± 0.0008 | Exact |
+| Double well | 0.8373 ± 0.0064 | **0.0240 ± 0.0011** | 0.0817 ± 0.0015 | 0.0179 ± 0.0003 |
+| Multiplicative | 0.0232 ± 0.0086 | **0.0127 ± 0.0006** | 0.0403 ± 0.0012 | 0.0092 ± 0.0001 |
+| OU–2D | 0.1977 ± 0.0072 | **0.0064 ± 0.0003** | 0.0448 ± 0.0002 | Exact |
+
+The comparison with the empirical $N=200$ representation is amortized: the MDN learns structure shared across many common-noise scenarios, while the empirical cloud is reconstructed independently within each test scenario.
 
 ### Moment functional
 
-```math
-V_{\mathrm{mom}}(x,\mu)
-=
-\langle x,m_1(\mu)\rangle
-+
-\mathrm{tr}\!\left(\mathrm{Cov}(\mu)\right)
-+
-\sin(x_1).
-```
+| Benchmark | Empirical `N=200` | MDN pipeline | Exact / independent reference |
+|---|---:|---:|---:|
+| OU–Gaussian | 3.78% ± 0.13% | **0.49% ± 0.07%** | 0.16% ± 0.02% |
+| OU–uniform | 3.18% ± 0.14% | **0.48% ± 0.11%** | 0.13% ± 0.02% |
+| OU–GMM | 4.22% ± 0.17% | **0.70% ± 0.07%** | 0.18% ± 0.02% |
+| Double well | 5.31% ± 0.15% | **2.24% ± 0.15%** | 2.47% ± 0.04% |
+| Multiplicative | 2.62% ± 0.15% | **1.40% ± 0.41%** | 1.25% ± 0.13% |
+| OU–2D | 3.11% ± 0.07% | **0.69% ± 0.06%** | 0.35% ± 0.06% |
 
-### Quantile/tail functional
+For `double_well` and `multiplicative`, the last column is a leakage-free independent-reference channel rather than an exact oracle.
+
+### Quantile-and-tail stress test
+
+For the one-dimensional benchmarks, the repository also evaluates
 
 ```math
 V_{\mathrm{quant}}(x,\mu)
 =
-x\left(q_{0.75}(\mu)-q_{0.25}(\mu)\right)
-+
-F_\mu(0)
-+
-\sin(x).
+x\bigl(q_{0.75}(\mu)-q_{0.25}(\mu)\bigr)
++F_\mu(0)+\sin(x).
 ```
 
-Here, $q_{0.75}(\mu)-q_{0.25}(\mu)$ is the interquartile range and
-$F_\mu(0)$ is the conditional probability of being below zero. This
-target is not, in general, determined by any fixed finite collection of
-ordinary moments and is particularly informative for the bimodal
-double-well benchmark.
+This target is a numerical stress test beyond the theorem’s global continuity assumptions. In the paper it is reported as a table, not as an additional figure.
 
-Both experiments use the same Fourier representation of the measure;
-only the regression target supplied to the cylindrical network changes.
+## Additional numerical checks
 
-## Results
+The manuscript and repository also include:
 
-The following results were obtained with seed `0` and the full
-configurations stored in `configs/<benchmark>.json`. Detailed parameters,
-metrics and runtimes are saved in each experiment's `metrics.json`.
+- strict single-particle training;
+- a `K_keep` particle-subsampling sweep;
+- learning-rate, mixture-size, Fourier-order, MDN-depth, and $\Psi$-depth sweeps;
+- an Itô–Stratonovich consistency check for the multiplicative benchmark.
 
-### Conditional-law approximation
+For the consistency check, the corrected Stratonovich scheme has mean $W_2$ gap `0.00449` to the Itô reference, below the estimated Monte Carlo resolution `0.01360`; the naive uncorrected scheme has gap `0.04941`.
 
-| Benchmark | Validation NLL | $W_2$ / sliced $W_2$ | Monte Carlo floor | Reference resolution |
-|---|---:|---:|---:|---:|
-| `ou` | 0.3012 (entropy floor: 0.3022) | **0.0066 ± 0.0035** | 0.0525 ± 0.0252 | Exact reference |
-| `double_well` | 0.8340 | **0.0290 ± 0.0129** | 0.0724 ± 0.0310 | 0.0305 |
-| `multiplicative` | 0.0190 | **0.0150 ± 0.0084** | 0.0302 ± 0.0096 | 0.0135 |
-| `ou2d` | 0.1988 (entropy floor: 0.1823) | **0.0060 ± 0.0034** | 0.0449 ± 0.0147 | Exact reference |
-
-The reported standard deviations are computed across test scenarios.
-The one-dimensional benchmarks use $W_2$, while `ou2d` uses sliced
-$W_2$.
-
-The MDN error is below the finite-particle Monte Carlo floor on all four
-benchmarks. This comparison quantifies the benefit of pooling information
-across many common-noise scenarios; it is not a like-for-like comparison
-between estimators trained from the same amount of information.
-
-For `ou`, the validation NLL is close to the entropy of the exact
-conditional Gaussian law. For `double_well`, the MDN Wasserstein error is
-approximately equal to the measured resolution of the finite
-$N_{\mathrm{ref}}=2000$ reference system.
-
-![Double-well conditional laws](docs/results/double_well_mdn_vs_ref.png)
-
-*Predicted Gaussian-mixture densities against the large-particle reference
-for three double-well test scenarios.*
-
-![Two-dimensional OU](docs/results/ou2d_mdn_vs_ref.png)
-
-*Exact conditional Gaussian ellipses and diagonal-mixture components
-predicted by the MDN for three two-dimensional test scenarios.*
-
-### Moment functional
-
-For the moment-based target, the relative test $L^2$ errors are:
-
-| Measure representation | `ou` | `double_well` | `multiplicative` | `ou2d` |
-|---|---:|---:|---:|---:|
-| Empirical plug-in, $N=200$ | 3.92% | 4.24% | 1.30% | 3.05% |
-| **MDN pipeline** | **0.55%** | **2.13%** | **0.89%** | **0.56%** |
-| Oracle integrals | 0.18% | 0.22% | 0.17% | 0.23% |
-
-The MDN representation improves over the empirical particle plug-in on all
-four benchmarks. The remaining difference between the MDN and oracle rows is indicative of
-the effect of conditional-law approximation, together with the training
-and regression error of the cylindrical network.
-
-The empirical, MDN and oracle networks have the same architecture, but are
-trained independently. They use the same target functional and evaluation points $x$ sampled
-independently from the same distribution.
-
-![Measure-representation comparison](docs/results/ou_measure_representations.png)
-
-*Relative test error obtained from empirical particle integrals, the MDN
-representation, and oracle integrals on the conditional OU benchmark.*
-
-
-
-### Quantile/tail functional
-
-The quantile experiment is available for the one-dimensional `ou` and
-`double_well` benchmarks:
-
-| Measure representation | `ou` | `double_well` |
-|---|---:|---:|
-| Empirical plug-in, $N=200$ | 5.02% | 5.68% |
-| **MDN pipeline** | **0.82%** | **2.72%** |
-| Oracle integrals | 0.44% | 1.34% |
-
-The inputs to the cylindrical network remain the same Fourier integrals.
-Only the target functional changes. In particular, the double-well target
-contains $F_\mu(0)$, which describes the conditional occupancy of the left
-well.
-
-### Itô–Stratonovich check
-
-The `multiplicative` benchmark has a state-dependent common-noise
-coefficient, so the Itô–Stratonovich correction is non-zero.
-
-The three-scheme experiment uses the same Brownian increments with
-$M=300$ scenarios, $N=2000$ particles and 200 time steps:
-
-| Scheme comparison | Mean $W_2$ gap |
-|---|---:|
-| Itô Euler–Maruyama vs corrected Stratonovich Heun | **0.0045** |
-| Itô Euler–Maruyama vs naive Stratonovich Heun | **0.0494** |
-| Estimated Monte Carlo resolution | 0.0136 |
-
-The corrected Heun scheme agrees with the Itô discretization below the
-estimated Monte Carlo resolution, whereas omitting the drift correction produces a
-clearly measurable discrepancy.
-
-
+Compact per-run and aggregated results are committed under [`results/`](results/). Raw experiment folders are intentionally excluded from Git.
 
 ## Installation
 
-### Windows prerequisites
+### Windows prerequisite
 
-The `iisignature` package contains a compiled C++ extension. Before
-installing the Python dependencies on Windows, make sure that
-**Microsoft C++ Build Tools 14.0 or later** is installed, including:
-
-- Desktop development with C++;
-- MSVC x64/x86 build tools;
-- Windows 10 or Windows 11 SDK.
+`iisignature` contains a compiled extension. On Windows, install Microsoft C++ Build Tools with **Desktop development with C++**, an MSVC x64/x86 toolchain, and a Windows SDK.
 
 ### Clone and install
 
@@ -262,193 +178,132 @@ cd cylindrical-mckean-vlasov
 
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
-
 python -m pip install --upgrade pip setuptools wheel
 python -m pip install -r requirements.txt
 ```
-## Usage
 
-Run all commands from the repository root with the virtual environment activated.
+## Quick start
 
-### Tests
+Run commands from the repository root with the virtual environment activated.
 
-```bash
-python -m pytest tests -v 
+```powershell
+python main.py --benchmark ou --quick --outdir outputs/quick_ou
 ```
 
-### Full benchmark configurations
-```bash
-python main.py --benchmark ou --baselines full --outdir outputs/ou
+A standard run writes `metrics.json`, `training_history.json`, and benchmark-specific figures to the selected output directory.
 
-python main.py --benchmark double_well --baselines full --outdir outputs/double_well
+## Reproduce the paper campaign
 
-python main.py --benchmark multiplicative --baselines full --outdir outputs/multiplicative
+The PowerShell driver executes the complete experiment plan, skips already completed runs unless `-Force` is passed, records a manifest, and aggregates the results at the end.
 
-python main.py --benchmark ou2d --baselines full --outdir outputs/ou2d
+```powershell
+.\run_all.ps1
 ```
 
-The option `--baselines full` trains and evaluates three measure
-representations:
+Useful options:
 
-1. empirical Fourier integrals computed from the particle cloud;
-2. Fourier integrals computed analytically from the MDN mixture;
-3. oracle Fourier integrals computed from the exact law or from `X_ref`.
-
-### Quantile/tail functional
-
-The quantile functional is available for the one-dimensional benchmarks.
-
-```bash
-python main.py --benchmark ou --functional quantile --baselines full --outdir outputs/ou_quantile
-
-python main.py --benchmark double_well --functional quantile --baselines full --outdir outputs/double_well_quantile
+```powershell
+.\run_all.ps1 -Quick
+.\run_all.ps1 -Force
+.\run_all.ps1 -Clean
+.\run_all.ps1 -StopOnError
 ```
 
-The Fourier representation supplied to the cylindrical network remains
-unchanged; only the target functional changes.
+To rebuild the summaries and plots from existing raw outputs:
 
-### Itô–Stratonovich consistency check
-
-```bash
-python main.py --benchmark multiplicative --ito-strat-check --outdir outputs/multiplicative
+```powershell
+python aggregate_full_results.py --root outputs/paper_full
 ```
 
-This compares the Itô Euler–Maruyama scheme with corrected and uncorrected
-Stratonovich Heun schemes. The results are written to:
+Aggregation writes CSV, JSON, and figures under `outputs/paper_full/aggregate/` without modifying the raw runs.
+
+## Individual experiments
+
+### Full moment-functional benchmark
+
+```powershell
+python main.py --benchmark ou_gmm --functional moments --baselines full --outdir outputs/ou_gmm
+```
+
+Available benchmark names are:
 
 ```text
-outputs/multiplicative/ito_strat_check.json
+ou, ou_uniform, ou_gmm, double_well, multiplicative, ou2d
 ```
 
-### Multi-seed experiment
+### Quantile-and-tail functional
 
-```bash
-python run_seeds.py --benchmark ou --seeds 0,1,2,3,4 -- --baselines emp --psi-epochs 150
+```powershell
+python main.py --benchmark ou_uniform --functional quantile --baselines full --outdir outputs/ou_uniform_quantile
 ```
 
-The individual runs and aggregated statistics are stored under:
+### Multi-seed run
 
-```text
-outputs/ou_seeds/
-├── seed0/
-├── seed1/
-├── seed2/
-├── seed3/
-├── seed4/
-└── summary.json
+```powershell
+python run_seeds.py --benchmark ou_gmm --seeds 0,1,2,3,4 -- --baselines full
 ```
 
-### Training diagnostics
+### One-factor-at-a-time sweeps
 
-Strict single-particle training:
+```powershell
+python sweeps.py --benchmark ou_gmm --parameter J --values 1,2,3,5,8
+python sweeps.py --benchmark ou_uniform --parameter n_fourier --values 1,2,4,6,8
+python sweeps.py --benchmark ou_gmm --parameter lr --values 0.0001,0.0003,0.001,0.003
+python sweeps.py --benchmark ou_gmm --parameter mdn_depth --values 1,2,3,4
+python sweeps.py --benchmark ou_gmm --parameter psi_depth --values 1,2,3,4
+```
 
-```bash
+### Additional diagnostics
+
+```powershell
 python main.py --benchmark ou --single-particle --outdir outputs/ou_single_particle
+python main.py --benchmark ou --sweep-kkeep 1,8,64,200 --outdir outputs/ou_kkeep
+python main.py --benchmark multiplicative --ito-strat-check --outdir outputs/ito_strat
+python main.py --benchmark ou --overfit-test --outdir outputs/ou_overfit
 ```
-
-Gradient-flow overfit test:
-
-```bash
-python main.py --benchmark ou --overfit-test
-```
-
-Study the effect of the number of retained particles:
-
-```bash
-python main.py --benchmark ou --sweep-kkeep 1,8,64,200 --outdir outputs/ou_kkeep_sweep
-```
-
-Signature-level experiment:
-
-```bash
-python main.py --benchmark double_well --sig-level 1 --outdir outputs/double_well_sig1
-```
-
-Empirical target statistics:
-
-```bash
-python main.py --benchmark ou --empirical-targets --baselines full --outdir outputs/ou_empirical_targets
-```
-
-## Generated outputs
-
-A standard run writes `metrics.json` and several figures to the selected
-output directory. Typical outputs are:
-
-```text
-metrics.json
-fig1_benchmark_density.png
-fig2_mdn_vs_ref.png
-fig3_training_curves.png
-fig4_w2_floor.png
-fig5_baselines.png
-```
-
-The comparison figure is generated when `--baselines full` is enabled.
-Figure names or contents may differ for benchmark-specific and
-multidimensional evaluations.
-
-Default hyperparameters are stored in:
-
-```text
-configs/<benchmark>.json
-```
-
-The complete run configuration, metrics and measured runtime are recorded
-in `metrics.json`.
 
 ## Repository layout
 
 ```text
 .
 ├── benchmarks/
-│   ├── base.py              # Common benchmark API
-│   ├── particle_ref.py      # Base class and X_ref utilities for particle-reference benchmarks
-│   ├── ou.py                # One-dimensional conditional OU with exact Gaussian reference
-│   ├── double_well.py       # Bistable dynamics, tamed Euler and large X_ref system
-│   ├── multiplicative.py    # State-dependent common noise and Itô–Stratonovich check
-│   └── ou2d.py              # Two-dimensional conditional OU with exact Gaussian reference
-│
-├── configs/                 # Per-benchmark hyperparameters in JSON format
-│
+├── configs/
 ├── docs/
-│   ├── architecture/        # Architecture, sequence and neural-network diagrams
-|   ├── results/             # Selected figures displayed in the README
-│    
-│
-├── tests/                   # Unit, numerical-identity and end-to-end pipeline tests
-├── outputs/                 # Generated metrics and figures
-│
-├── features.py              # Fourier features of μ₀ and time-augmented path signatures
-├── mdn.py                   # Mixture-density network and NLL training loop
-├── cylindrical.py           # Cylindrical Ψ network and Fourier measure representations
-├── evaluate.py              # W₂, sliced W₂, MC floor, relative L² metrics and figures
-├── main.py                  # End-to-end pipeline and command-line interface
-├── run_seeds.py             # Multi-seed execution and metric aggregation
-├── requirements.txt         # Python dependencies
-└── README.md                # Project overview, installation, usage and main results
+│   ├── architecture/
+│   │   └── pipeline_architecture_overview.png
+│   └── results/
+│       ├── figure1_training_convergence_ou_gmm.png
+│       ├── figure2_law_error_across_benchmarks.png
+│       ├── figure3_functional_error_across_benchmarks.png
+│       ├── figure4_signature_depth_double_well.png
+│       └── figure5_fourier_sensitivity_non_gaussian.png
+├── results/
+├── tests/
+├── aggregate_full_results.py
+├── cylindrical.py
+├── evaluate.py
+├── features.py
+├── main.py
+├── mdn.py
+├── run_all.ps1
+├── run_seeds.py
+├── sweeps.py
+└── requirements.txt
 ```
 
-The benchmark inheritance structure is:
+## Tests
 
-```text
-Benchmark
-├── OrnsteinUhlenbeck
-├── OU2d
-└── ParticleReferenceBenchmark
-    ├── DoubleWell
-    └── Multiplicative
+```powershell
+python -m pytest tests -v
 ```
 
-`ou.py` and `ou2d.py` inherit directly from the common benchmark base
-class. `double_well.py` and `multiplicative.py` inherit from
-`particle_ref.py`, which provides the shared large-reference-particle
-machinery.
+## Reproducibility notes
 
-
-## Reproducibility
-
-All main results use seed `0` and the full configurations in `configs/`.
-Each run saves its configuration, metrics and runtime in
-`outputs/<benchmark>/metrics.json`.
+- Main moment-functional tables use seeds `0,1,2,3,4`.
+- Quantile-and-tail experiments use seed `0`.
+- Default hyperparameters are stored in `configs/<benchmark>.json`.
+- Every raw run stores its resolved configuration and runtime in `metrics.json`.
+- The MDN is frozen before training each downstream cylindrical network.
+- The empirical, MDN, and exact/reference channels use separate copies of the downstream network.
+- Theoretical bounded-coefficient assumptions do not cover every numerical benchmark; the OU and double-well drifts are retained as standard test cases.
 

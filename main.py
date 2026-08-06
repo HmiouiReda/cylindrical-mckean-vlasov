@@ -131,7 +131,7 @@ def main():
         run["k_keep"] = 1
     benchmark = get_benchmark(args.benchmark, **bench_params)
     M, N = run["M"], run["N"]
-    torch.set_num_threads(2)   # small tensors => limit CPU contention
+    #torch.set_num_threads(2)   # small tensors => limit CPU contention
 
     rng = np.random.default_rng(args.seed)
     torch.manual_seed(args.seed)
