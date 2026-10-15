@@ -49,6 +49,29 @@ class DoubleWell(ParticleReferenceBenchmark):
     def __init__(self, **kwargs):
         self.p = DoubleWellParams(**kwargs)
 
+    
+    evaluation_scheme = "tamed_euler"
+    
+    def sample_evaluation_points(self, data, k_x, rng, n_particles=None):
+        """First k_x terminal states of a separate interacting system C."""
+        if k_x <= 0 or n_particles is None or n_particles < k_x:
+            raise ValueError("Require n_particles >= k_x > 0 for system C")
+        p = self.p
+        M = len(data["m0"])
+        X = (data["m0"][:, None] + data["s0"][:, None]
+             * rng.standard_normal((M, n_particles)))
+
+        increments = np.diff(data["W0"], axis=1)
+        for k, dt in enumerate(np.diff(data["times"])):
+            dW0 = increments[:, k:k + 1]
+            dB = np.sqrt(dt) * rng.standard_normal((M, n_particles))
+            mean_C = X.mean(axis=1, keepdims=True)
+            drift = p.kappa * (X - X ** 3) + p.theta * (mean_C - X)
+            drift = drift / (1.0 + dt * np.abs(drift))
+            X = X + drift * dt + p.sigma * dB + p.sigma0 * dW0
+
+        return X[:, :k_x].copy()
+
     def simulate(self,M: int,N: int,rng: np.random.Generator) -> dict:
         p = self.p
         dt = p.T / p.n_steps

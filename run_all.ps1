@@ -77,7 +77,7 @@ $JValuesToTrain = @(1, 2, 3, 8)              # J=5 is reused from headline.
 $FourierValuesToTrain = @(1, 2, 6, 8)        # P=4 is reused from headline.
 $LearningRateValuesToTrain = @(0.0001, 0.0003, 0.003) # 0.001 is reused.
 $DepthValuesToTrain = @(1, 3, 4)              # depth=2 is reused.
-$SignatureValuesToTrain = @(1, 2)             # level=3 is reused for double well.
+$SignatureValuesToTrain = @(1, 2, 4, 5, 6)    # level=3 is reused from headline.
 
 $script:FailureCount = 0
 

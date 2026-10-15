@@ -6,6 +6,7 @@ python sweeps.py --benchmark ou_gmm --parameter J --values 1,2,3,5,8
 python sweeps.py --benchmark ou_uniform --parameter n_fourier --values 1,2,4,6,8
 python sweeps.py --benchmark ou_gmm --parameter mdn_depth --values 1,2,3,4
 python sweeps.py --benchmark ou_gmm --parameter psi_depth --values 1,2,3,4
+python sweeps.py --benchmark double_well --parameter sig_level --values 1,2,3,4,5,6
 """
 
 from __future__ import annotations
@@ -30,6 +31,7 @@ CLI_FLAG = {
     "mdn_depth": "--mdn-depth",
     "psi_depth": "--psi-depth",
     "lr": "--lr",
+    "sig_level": "--sig-level",
 }
 
 

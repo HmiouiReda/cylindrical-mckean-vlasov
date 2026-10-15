@@ -36,6 +36,18 @@ class Benchmark(ABC):
         plus benchmark-specific ground-truth entries (mT/vT or X_ref).
         """
 
+    # Remark 15
+    def sample_evaluation_points(self, data: dict, k_x: int,
+                                rng: np.random.Generator,
+                                n_particles: int | None = None) -> np.ndarray:
+        """Fresh states conditional on the scenario (mu0, W0).
+
+        Return (M, k_x) in 1D, or (M, k_x, d) in higher dimension.
+        Use only scenario parameters and fresh randomness; do not sample
+        from XT or the reference clouds. Nonlinear benchmarks simulate a
+        separate system with n_particles particles and its own mean field.
+        """
+
     # reference conditional law (validation only)
     @abstractmethod
     def ref_quantiles(self, data: dict, probs: np.ndarray) -> np.ndarray:

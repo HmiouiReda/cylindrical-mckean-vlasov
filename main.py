@@ -35,7 +35,8 @@ from evaluate import (make_baseline_figure,make_convergence_figure,
 DEFAULT_RUN = {"M": 4000,"N": 200,"sig_level": 2,"n_fourier": 4,
     "J": 5,"k_keep": 64,"mdn_depth": 2,"psi_depth": 2,"mdn_epochs": 400,
     "psi_epochs": 350,"hidden": 128,"S_quant": 2048,"batch": 256,"lr": 1e-3,
-    "k_x": 16,"curve_every": 10,"curve_scenarios": 128,"curve_quantiles": 256}
+    "k_x": 16, "k_x_test": 200, "n_eval_particles": 2000,"curve_every": 10,
+    "curve_scenarios": 128,"curve_quantiles": 256}
 
 
 def get_args():
@@ -52,7 +53,7 @@ def get_args():
     # config overrides (0 / empty = use the config value)
     p.add_argument("--M", type=int, default=0, help="number of scenarios")
     p.add_argument("--N", type=int, default=0, help="particles per scenario")
-    p.add_argument("--sig-level", type=int, default=0, choices=[0, 1, 2, 3])
+    p.add_argument("--sig-level", type=int, default=0, help="signature truncation level")
     p.add_argument("--J", type=int, default=0, help="mixture components")
     p.add_argument("--n-fourier",type=int,default=0,
         help="number P of Fourier frequencies (2P sine/cosine features)")
@@ -327,10 +328,11 @@ def main():
           f"MC floor (N={N}) = {w2_floor.mean():.4f} +/- {w2_floor.std():.4f}"
           f"   =>  MDN beats the floor: {'YES' if beats else 'NO'}")
     ref_res = benchmark.reference_resolution(d_te)
-    if ref_res is not None:
-        print(f"[W2] reference resolution (half-sample estimate of the "
-              f"reference's own W2 error) = {ref_res:.4f}")
-
+    # The current reference_resolution implementation returns mean W2(A, B) / 2.
+    ref_ab_w2 = None if ref_res is None else 2.0 * ref_res
+    if ref_ab_w2 is not None:
+        print(f"[W2] unscaled A/B replicate discrepancy = {ref_ab_w2:.4f}")
+        print(f"[W2] heuristic pooled-reference scale = {ref_res:.4f}")
     # ---- optional: K_keep sweep -------------------------------------------
     sweep_results = run_sweep() if args.sweep_kkeep else {}
 
@@ -354,14 +356,43 @@ def main():
     # Build x and y ONCE for each split.
     # Every measure representation will use exactly the same x points and the
     # same labels. Only the measure-channel integrals will change.
-    def shared_xy(dd, kx):
-        f1, f2 = target_pair(dd)
-        return psi_xy(dd["XT"],f1,f2,kx,rng,
-            functional=args.functional,empirical_targets=args.empirical_targets)
+    # Separate random streams for evaluation states in each split.
+    eval_seeds = np.random.SeedSequence([args.seed, 15]).spawn(3)
 
-    xy_tr = shared_xy(d_tr, run["k_x"])
-    xy_va = shared_xy(d_va, run["k_x"])
-    xy_te = shared_xy(d_te, 0)
+    def shared_xy(dd, kx, eval_seed):
+        if kx <= 0:
+            raise ValueError("The number of evaluation points must be positive")
+        rng_x = np.random.default_rng(eval_seed)
+        x_eval = benchmark.sample_evaluation_points(
+            dd, kx, rng_x, n_particles=run["n_eval_particles"]
+        )
+        expected_shape = (len(dd["XT"]), kx) + dd["XT"].shape[2:]
+        if x_eval.shape != expected_shape or not np.isfinite(x_eval).all():
+            raise ValueError("Invalid independent evaluation points")
+
+        if args.empirical_targets:
+            # Preserve this optional mode: labels use the ORIGINAL XT cloud.
+            cloud = dd["XT"]
+            if args.functional == "quantile":
+                q = np.quantile(cloud, [0.25, 0.75], axis=1)
+                f1, f2 = q[1] - q[0], (cloud <= 0.0).mean(axis=1)
+            elif benchmark.d == 1:
+                f1, f2 = cloud.mean(axis=1), cloud.var(axis=1)
+            else:
+                f1 = cloud.mean(axis=1)
+                f2 = cloud.var(axis=1).sum(axis=-1)
+        else:
+            f1, f2 = target_pair(dd)
+
+        # All x_eval points are retained. Labels use the statistics above.
+        return psi_xy(
+            x_eval, f1, f2, 0, rng_x,
+            functional=args.functional, empirical_targets=False
+        )
+
+    xy_tr = shared_xy(d_tr, run["k_x"], eval_seeds[0])
+    xy_va = shared_xy(d_va, run["k_x"], eval_seeds[1])
+    xy_te = shared_xy(d_te, run["k_x_test"], eval_seeds[2])
 
     def attach_three(ints_tr, ints_va, ints_te):
         datasets = []
@@ -448,12 +479,12 @@ def main():
     if pair is not None and not args.empirical_targets:
         (a1, a2), (b1, b2) = pair
 
-        # Test uses every XT particle, so restore shape (M, N).
-        x_np = (
-            xy_te[0]
-            .numpy()
-            .reshape(d_te["XT"].shape)
-        )
+        # Test has k_x_test states per scenario, independently of N.
+        n_scenarios = len(d_te["XT"])
+        k_test = xy_te[2]
+        x_shape = ((n_scenarios, k_test) if benchmark.d == 1
+                   else (n_scenarios, k_test, benchmark.d))
+        x_np = xy_te[0].numpy().reshape(x_shape)
 
         if args.functional == "quantile":
             y_a = V_target_quantile(
@@ -472,7 +503,10 @@ def main():
             y_a = V_target_nd(x_np,a1[:, None, :],a2[:, None])
             y_b = V_target_nd(x_np,b1[:, None, :],b2[:, None])
 
-        # 1/2 E[(Y_A - Y_B)^2] estimates the label-noise variance.
+        # Conditional on the scenario and x, A/B are independent, identically
+        # distributed reference replicates. Half the mean squared difference
+        # estimates the average conditional variance of one reference label.
+        # This diagnostic does not measure shared particle/discretization bias.
         noise_rms = np.sqrt(0.5 * np.mean((y_a - y_b) ** 2))
         # Same normalization as relative_l2 against labels B.
         signal_rms = np.sqrt(np.mean(y_b ** 2))
@@ -498,8 +532,8 @@ def main():
     print(f"     {reference_baseline_label:31s}: {pct(rel_orc)}")
 
     if functional_ref_floor is not None:
-        print(f"irreducible reference-target floor: {100 * functional_ref_floor:.2f}%")
-        print("[L2] noise-adjusted error sqrt(max(observed^2 - floor^2, 0)):")
+        print(f"reference-label variability diagnostic: {100 * functional_ref_floor:.2f}%")
+        print("[L2] noise-adjusted errors (diagnostic only):")
         print(f"     empirical plug-in (N={N:4d})     : {pct(rel_emp_adjusted)}")
         print(f"     MDN pipeline (ours)             : {pct(rel_full_adjusted)}")
         print(f"     {reference_baseline_label:31s}: {pct(rel_orc_adjusted)}")
@@ -523,6 +557,13 @@ def main():
                     empirical_targets=args.empirical_targets,
                     benchmark_params={f.name: getattr(benchmark.p, f.name)
                                       for f in dataclasses.fields(benchmark.p)}),
+        evaluation_points=dict(protocol="independent_x_v1",distribution=("exact_conditional_law" if benchmark.has_closed_form
+                else "discretized_particle_marginal"),sampler=type(benchmark).__name__ + ".sample_evaluation_points",
+                k_train=int(xy_tr[2]), k_validation=int(xy_va[2]),k_test=int(xy_te[2]),n_particles=(None if benchmark.has_closed_form
+                else int(run["n_eval_particles"])),scheme=getattr(benchmark, "evaluation_scheme", None),
+                time_grid=(None if benchmark.has_closed_form else d_te["times"].tolist()),conditional_on=["mu0", "W0"],
+                shared_across_methods=True,rng_entropy=[args.seed, 15],rng_spawn_keys=dict(train=[0], validation=[1], test=[2]),
+                label_source=("empirical_XT" if args.empirical_targets else "exact_law" if benchmark.has_closed_form else "reference_B")),
         mdn_val_nll=float(best_nll),
         entropy_floor=(float(floor) if floor is not None else None),
         w2_mdn_mean=float(w2_model.mean()), w2_mdn_std=float(w2_model.std()),
@@ -540,7 +581,8 @@ def main():
         rel_l2_mdn_noise_adjusted=(None if rel_full_adjusted is None else float(rel_full_adjusted)),
         rel_l2_reference_noise_adjusted=(None if rel_orc_adjusted is None else float(rel_orc_adjusted)),
         n_ref_per_replicate=(int(benchmark.p.n_ref) if hasattr(benchmark.p, "n_ref") else None),
-        n_ref_pooled=(2 * int(benchmark.p.n_ref) if hasattr(benchmark.p, "n_ref") else None))
+        n_ref_pooled=(2 * int(benchmark.p.n_ref) if hasattr(benchmark.p, "n_ref") else None),
+        reference_ab_w2_mean=ref_ab_w2,reference_resolution_kind=(None if ref_res is None else "heuristic_half_mean_AB_distance"),)
     
     with open(outdir / "metrics.json", "w") as f:
         json.dump(metrics, f, indent=2)
@@ -553,9 +595,8 @@ def main():
     print(f"  W2 (conditional law): MDN {w2_model.mean():.4f}  vs  "
           f"MC floor {w2_floor.mean():.4f}   "
           f"({'MDN < floor: OK' if beats else 'MDN >= floor'})")
-    if ref_res is not None:
-        print(f"  Reference resolution: {ref_res:.4f} "
-              f"(lower bound on measurable W2)")
+    if ref_ab_w2 is not None:
+        print(f"  Unscaled A/B W2 discrepancy: {ref_ab_w2:.4f}")
     print(f"empirical plug-in {pct(rel_emp).strip()}  |  "
           f"MDN pipeline {pct(rel_full).strip()}  |  "
           f"oracle {pct(rel_orc).strip()}")

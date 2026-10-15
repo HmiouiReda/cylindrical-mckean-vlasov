@@ -86,6 +86,15 @@ class UniformInitialOU(Benchmark):
     def __init__(self, **kwargs):
         self.p = UniformOUParams(**kwargs)
 
+    def sample_evaluation_points(self, data, k_x, rng, n_particles=None):
+        """Fresh draws from the exact uniform-Gaussian convolution."""
+        M = len(data["m0"])
+        return (data["mT"][:, None]
+                + data["half_width_T"][:, None]
+                * rng.uniform(-1.0, 1.0, size=(M, k_x))
+                + np.sqrt(data["v_noise"])[:, None]
+                * rng.standard_normal((M, k_x)))
+
     def simulate(self,M: int,N: int,rng: np.random.Generator,) -> dict:
         p = self.p
         dt = p.T / p.n_steps
@@ -229,6 +238,15 @@ class GaussianMixtureInitialOU(Benchmark):
 
     def __init__(self, **kwargs):
         self.p = GaussianMixtureOUParams(**kwargs)
+
+    def sample_evaluation_points(self, data, k_x, rng, n_particles=None):
+        """Fresh draws from the exact terminal two-Gaussian mixture."""
+        M = len(data["m0"])
+        choose_first = rng.random((M, k_x)) < data["weight"][:, None]
+        means = np.where(choose_first,
+                         data["mu1_T"][:, None], data["mu2_T"][:, None])
+        return (means + np.sqrt(data["component_var_T"])[:, None]
+                * rng.standard_normal((M, k_x)))
 
     def simulate(self,M: int,N: int,rng: np.random.Generator,) -> dict:
         p = self.p

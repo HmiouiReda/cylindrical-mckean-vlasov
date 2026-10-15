@@ -35,6 +35,13 @@ class OrnsteinUhlenbeck(Benchmark):
     def __init__(self, **kwargs):
         self.p = OUParams(**kwargs)
 
+    def sample_evaluation_points(self, data, k_x, rng, n_particles=None):
+        """Fresh draws from the exact conditional Gaussian law."""
+        M = len(data["m0"])
+        return (data["mT"][:, None]
+                + np.sqrt(data["vT"])[:, None]
+                * rng.standard_normal((M, k_x)))
+
 
     def simulate(self, M: int, N: int, rng: np.random.Generator) -> dict:
         p = self.p

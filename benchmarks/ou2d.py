@@ -54,6 +54,14 @@ class OU2d(Benchmark):
         self.L = np.linalg.cholesky(self.C)
         self.s0v = np.asarray(p.sigma0_vec, dtype=float)
 
+    def sample_evaluation_points(self, data, k_x, rng, n_particles=None):
+        """Fresh draws from N_2(mT, VT), with full covariance."""
+        M = len(data["m0"])
+        chol = np.linalg.cholesky(data["VT"])
+        z = rng.standard_normal((M, k_x, self.d))
+        return (data["mT"][:, None, :]
+                + np.einsum("mij,mkj->mki", chol, z))
+
     def simulate(self, M: int, N: int, rng: np.random.Generator) -> dict:
         p = self.p
         dt = p.T / p.n_steps
