@@ -56,13 +56,14 @@ The common-noise branch first applies the causal restriction $r_t$, then compute
 | `ou_gmm` | 1 | Two-component Gaussian mixture | Exact Gaussian mixture | Multimodal initial law |
 | `double_well` | 1 | Gaussian | Two independent reference systems | Nonlinear and potentially bimodal dynamics |
 | `multiplicative` | 1 | Gaussian | Two independent reference systems | State-dependent common noise |
+| `kuramoto` | 1 | Gaussian | Two independent reference systems | Bi-harmonic interaction; satisfies every hypothesis of the theorem |
 | `ou2d` | 2 | Gaussian | Exact correlated Gaussian | Multidimensional conditional law |
 
-All models use scalar common noise. The first three benchmarks share the same conditional OU dynamics and differ only through the initial-law family, isolating the role of the Fourier encoding.
+All models use scalar common noise. The first three benchmarks share the same conditional OU dynamics and differ only through the initial-law family, isolating the role of the Fourier encoding. `kuramoto` is the only benchmark whose coefficients are bounded and Lipschitz in the measure argument, and whose interaction is not a conditional mean: the drift depends on $\mu$ through the four Fourier moments $\int\sin(qy)\,\mu(dy)$, $\int\cos(qy)\,\mu(dy)$, $q=1,2$.
 
 ## Leakage-free reference design
 
-For `double_well` and `multiplicative`, no closed-form conditional law is available. Each scenario therefore uses two conditionally independent reference systems, A and B, sharing only $(\mu_0,W^0)$:
+For `double_well`, `multiplicative` and `kuramoto`, no closed-form conditional law is available. Each scenario therefore uses two conditionally independent reference systems, A and B, sharing only $(\mu_0,W^0)$:
 
 - reference A supplies measure inputs to the independent-reference cylindrical baseline;
 - reference B supplies regression targets;
@@ -136,7 +137,7 @@ The comparison with the empirical $N=200$ representation is amortized: the MDN l
 | Multiplicative | 2.62% ± 0.15% | **1.40% ± 0.41%** | 1.25% ± 0.13% |
 | OU–2D | 3.11% ± 0.07% | **0.69% ± 0.06%** | 0.35% ± 0.06% |
 
-For `double_well` and `multiplicative`, the last column is a leakage-free independent-reference channel rather than an exact oracle.
+For `double_well`, `multiplicative` and `kuramoto`, the last column is a leakage-free independent-reference channel rather than an exact oracle.
 
 ### Quantile-and-tail stress test
 
@@ -150,6 +151,20 @@ x\bigl(q_{0.75}(\mu)-q_{0.25}(\mu)\bigr)
 ```
 
 This target is a numerical stress test beyond the theorem’s global continuity assumptions. In the paper it is reported as a table, not as an additional figure.
+
+### Order-parameter functional
+
+For the one-dimensional benchmarks, the repository also evaluates
+
+```math
+V_{\mathrm{order}}(x,\mu)
+=
+x\,r_1(\mu)+r_2(\mu)+\sin(x),
+\qquad
+r_q(\mu)=\Bigl|\int e^{iqy}\,\mu(dy)\Bigr|,
+```
+
+the first two Kuramoto order parameters. Unlike the quantile target this one is bounded and Lipschitz in $W_2$, so it lies inside the theorem; and it is not a function of finitely many moments. It is informative only where the conditional law is far from Gaussian, since $r_1=e^{-v/2}$ exactly for a Gaussian law of variance $v$ — in practice on `kuramoto` and `double_well`.
 
 ## Additional numerical checks
 
@@ -228,13 +243,19 @@ python main.py --benchmark ou_gmm --functional moments --baselines full --outdir
 Available benchmark names are:
 
 ```text
-ou, ou_uniform, ou_gmm, double_well, multiplicative, ou2d
+ou, ou_uniform, ou_gmm, double_well, multiplicative, ou2d, kuramoto
 ```
 
 ### Quantile-and-tail functional
 
 ```powershell
 python main.py --benchmark ou_uniform --functional quantile --baselines full --outdir outputs/ou_uniform_quantile
+```
+
+### Order-parameter functional
+
+```powershell
+python main.py --benchmark kuramoto --functional order --baselines full --outdir outputs/kuramoto_order
 ```
 
 ### Multi-seed run
