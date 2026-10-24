@@ -59,3 +59,15 @@ def test_ou2d_oracle_fourier_vs_sampling():
 
 
 
+
+# Bi-harmonic Kuramoto: the common noise is state-dependent here too, so the
+# Ito-Stratonovich correction is non-trivial.  Unlike `multiplicative` the
+# correction is small against the resolution of this benchmark's wide
+# two-cluster law, so the comparison is pathwise: same increments, and the
+# naive Stratonovich reading must drift measurably further from the Ito law
+# than the corrected one does.
+def test_kuramoto_ito_stratonovich_correction():
+    b = get_benchmark("kuramoto", n_steps=200)
+    r = b.ito_stratonovich_check(M=40, N=1500,
+                                 rng=np.random.default_rng(0))
+    assert r["gap_naive_mean"] > 2.0 * r["gap_corrected_mean"]

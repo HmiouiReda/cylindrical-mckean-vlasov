@@ -10,6 +10,7 @@ from .ou import OrnsteinUhlenbeck, OUParams
 from .double_well import DoubleWell, DoubleWellParams
 from .multiplicative import MultiplicativeOU, MultiplicativeParams
 from .ou2d import OU2d, OU2dParams
+from .kuramoto import Kuramoto, KuramotoParams
 from .ou_non_gaussian import UniformInitialOU,UniformOUParams,GaussianMixtureInitialOU,GaussianMixtureOUParams
 
 REGISTRY = {
@@ -19,6 +20,7 @@ REGISTRY = {
     "ou2d": OU2d,
     "ou_uniform": UniformInitialOU,
     "ou_gmm": GaussianMixtureInitialOU,
+    "kuramoto": Kuramoto,
 }
 
 PARAMS = {
@@ -28,6 +30,7 @@ PARAMS = {
     "ou2d": OU2dParams,
     "ou_uniform": UniformOUParams,
     "ou_gmm": GaussianMixtureOUParams,
+    "kuramoto": KuramotoParams,
 }
 
 
