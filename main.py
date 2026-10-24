@@ -22,11 +22,13 @@ import numpy as np
 import torch
 
 from benchmarks import PARAMS, get_benchmark
+from benchmarks.base import order_parameters
 from features import (Scaler,build_features,make_freqs,sig_dim,)
 from mdn import MDN, train_mdn
 from cylindrical import (Psi,attach_integrals,empirical_fourier,
             mdn_integrals,psi_xy,train_regressor,V_target,
-            V_target_nd,V_target_quantile,psi_dataset,make_psi_inputs)
+            V_target_nd,V_target_order,V_target_quantile,psi_dataset,
+            make_psi_inputs)
 from evaluate import (make_baseline_figure,make_convergence_figure,
             make_figures,relative_l2,sw2_mc_floor,sw2_mdn_vs_ref,
             w2_mc_floor,w2_mdn_vs_ref)
@@ -68,10 +70,13 @@ def get_args():
     p.add_argument("--mdn-epochs", type=int, default=0)
     p.add_argument("--psi-epochs", type=int, default=0)
     p.add_argument("--functional", type=str, default="moments",
-                   choices=["moments", "quantile"],
+                   choices=["moments", "quantile", "order"],
                    help="target functional V(x, mu): 'moments' (easy: two "
-                        "first moments) or 'quantile' (hard: x*IQR(mu) + "
-                        "F_mu(0) + sin x, d = 1 only)")
+                        "first moments), 'quantile' (hard, OUTSIDE the "
+                        "theorem: x*IQR(mu) + F_mu(0) + sin x, d = 1 only) "
+                        "or 'order' (hard, INSIDE the theorem: x*r1(mu) + "
+                        "r2(mu) + sin x with r_q the Kuramoto order "
+                        "parameters, d = 1 only)")
     p.add_argument("--baselines", type=str, default="full",
                     choices=["full", "emp", "none"],
                     help="V-hat comparison modes: "
@@ -340,8 +345,8 @@ def main():
     print("\n[Psi] closed-form <phi, mixture> integration + MSE training "
           "(MDN frozen)")
     freqs_t = torch.as_tensor(freqs_np, dtype=torch.float32)
-    assert not (args.functional == "quantile" and benchmark.d > 1), \
-        "the quantile functional is defined for d = 1"
+    assert not (args.functional in ("quantile", "order") and benchmark.d > 1), \
+        f"the {args.functional} functional is defined for d = 1"
 
     def target_pair(dd):
         """Statistics used to construct the regression labels.
@@ -351,6 +356,8 @@ def main():
             interquartile_range = q[1] - q[0]
             cdf0 = benchmark.target_cdf0(dd)
             return interquartile_range, cdf0
+        if args.functional == "order":
+            return benchmark.target_order(dd)
         return benchmark.target_moments(dd)
 
     # Build x and y ONCE for each split.
@@ -376,6 +383,9 @@ def main():
             if args.functional == "quantile":
                 q = np.quantile(cloud, [0.25, 0.75], axis=1)
                 f1, f2 = q[1] - q[0], (cloud <= 0.0).mean(axis=1)
+            elif args.functional == "order":
+                f1 = order_parameters(cloud, 1)
+                f2 = order_parameters(cloud, 2)
             elif benchmark.d == 1:
                 f1, f2 = cloud.mean(axis=1), cloud.var(axis=1)
             else:
@@ -494,6 +504,10 @@ def main():
             )
 
             y_b = V_target_quantile(x_np,b1[:, None],b2[:, None])
+
+        elif args.functional == "order":
+            y_a = V_target_order(x_np,a1[:, None],a2[:, None])
+            y_b = V_target_order(x_np,b1[:, None],b2[:, None])
 
         elif benchmark.d == 1:
             y_a = V_target(x_np,a1[:, None],a2[:, None])

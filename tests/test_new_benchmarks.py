@@ -71,3 +71,39 @@ def test_kuramoto_ito_stratonovich_correction():
     r = b.ito_stratonovich_check(M=40, N=1500,
                                  rng=np.random.default_rng(0))
     assert r["gap_naive_mean"] > 2.0 * r["gap_corrected_mean"]
+
+
+# Order-parameter functional (task 7)
+def test_order_parameters_of_a_two_cluster_cloud():
+    """r_1 vanishes and r_2 is one for two equal clusters at separation pi:
+    the odd order parameters of the nematic state are zero."""
+    from benchmarks.base import order_parameters
+    cloud = np.tile(np.array([-np.pi / 2, np.pi / 2]), (3, 500))
+    assert abs(order_parameters(cloud, 1)).max() < 1e-12
+    assert np.abs(order_parameters(cloud, 2) - 1.0).max() < 1e-12
+
+
+def test_order_parameters_match_the_gaussian_closed_form():
+    """For a Gaussian law r_q = exp(-q^2 v / 2) exactly.  Checks the generic
+    quantile-grid implementation against ou's exact conditional variance."""
+    b = get_benchmark("ou", n_steps=50)
+    d = b.simulate(50, 10, np.random.default_rng(0))
+    r1, r2 = b.ref_order(d)
+    v = d["vT"]
+    assert np.abs(r1 - np.exp(-0.5 * v)).max() < 1e-3
+    assert np.abs(r2 - np.exp(-2.0 * v)).max() < 1e-3
+
+
+def test_order_target_pair_uses_independent_replicates():
+    """A and B must give different numbers: the labels and the measure
+    channel are built from separate reference systems."""
+    b = get_benchmark("kuramoto", n_steps=60, n_ref=400)
+    d = b.simulate(20, 25, np.random.default_rng(1))
+    (a1, a2), (b1, b2) = b.independent_target_pair(d, "order")
+    for r in (a1, a2, b1, b2):
+        assert r.shape == (20,)
+        assert ((r >= 0.0) & (r <= 1.0)).all()
+    assert not np.allclose(a1, b1)
+    # The labels come from replicate B.
+    t1, t2 = b.target_order(d)
+    assert np.allclose(t1, b1) and np.allclose(t2, b2)

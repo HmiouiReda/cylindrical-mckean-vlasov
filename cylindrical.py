@@ -21,6 +21,7 @@ import torch
 import torch.nn as nn
 
 from mdn import MDN
+from benchmarks.base import order_parameters
 
 
 
@@ -88,6 +89,17 @@ def V_target_quantile(x: np.ndarray, iqr: np.ndarray,
     return x * iqr + cdf0 + np.sin(x)
 
 
+def V_target_order(x: np.ndarray, r1: np.ndarray,
+                   r2: np.ndarray) -> np.ndarray:
+    """Order-parameter functional (d = 1):  V = x * r1(mu) + r2(mu) + sin(x),
+    with r_q(mu) = |int e^{i q y} mu(dy)| the modulus of the characteristic
+    function at q -- the Kuramoto order parameters.  Bounded in [0, 1] and
+    q-Lipschitz in W2, so Theorem 1 covers it; and not a function of
+    finitely many moments.  This is the functional INSIDE the theory, as
+    opposed to the quantile one."""
+    return x * r1 + r2 + np.sin(x)
+
+
 
 def mlp(din: int, hidden: int, dout: int, depth: int = 2) -> nn.Sequential:
     layers, d = [], din
@@ -118,7 +130,8 @@ def psi_xy(XT: np.ndarray, f1_ref: np.ndarray, f2_ref: np.ndarray, k_x: int,
     all integral variants are trained/evaluated on identical data.
 
     functional: "moments" -> (f1, f2) = (mean, variance/trace);
-                "quantile" -> (f1, f2) = (IQR, F_mu(0)), d = 1 only.
+                "quantile" -> (f1, f2) = (IQR, F_mu(0)), d = 1 only;
+                "order"    -> (f1, f2) = (r_1, r_2), d = 1 only.
 
     Returns x_t (rows, d), y_t (rows, 1), k_x  with rows = M * k_x, scenario-major order."""
     M, N = XT.shape[0], XT.shape[1]
@@ -150,6 +163,13 @@ def psi_xy(XT: np.ndarray, f1_ref: np.ndarray, f2_ref: np.ndarray, k_x: int,
         else:
             f1, f2 = f1_ref, f2_ref
         y = V_target_quantile(x, f1[:, None], f2[:, None])
+    elif functional == "order":
+        assert d == 1, "the order functional is defined for d = 1"
+        if empirical_targets:
+            f1, f2 = order_parameters(XT, 1), order_parameters(XT, 2)
+        else:
+            f1, f2 = f1_ref, f2_ref
+        y = V_target_order(x, f1[:, None], f2[:, None])
     else:
         raise ValueError(f"unknown functional '{functional}'")
 

@@ -17,6 +17,14 @@ from abc import ABC, abstractmethod
 import numpy as np
 
 
+def order_parameters(cloud: np.ndarray, q: int = 1) -> np.ndarray:
+    """Kuramoto order parameter  r_q(mu) = |int e^{i q y} mu(dy)|  of an
+    empirical cloud: (M, N) -> (M,).  Bounded by 1 and q-Lipschitz in W2."""
+    s = np.sin(q * cloud).mean(axis=1)
+    c = np.cos(q * cloud).mean(axis=1)
+    return np.hypot(s, c)
+
+
 class Benchmark(ABC):
     name: str = "base"
     pretty: str = "benchmark"  #name for printing
@@ -87,6 +95,10 @@ class Benchmark(ABC):
         """CDF value used to form regression targets."""
         return self.ref_cdf0(data)
 
+    def target_order(self, data: dict, qs=(1, 2)) -> tuple:
+        """Order parameters used to form regression targets."""
+        return self.ref_order(data, qs)
+
     def independent_target_pair(self, data: dict, functional: str):
         """Two independent estimates of the target statistics, when available.
 
@@ -114,6 +126,15 @@ class Benchmark(ABC):
         p = (np.arange(S) + 0.5) / S
         q = self.ref_quantiles(data, p)               # (S, B)
         return (q <= 0.0).mean(axis=0)
+
+    def ref_order(self, data: dict, qs=(1, 2)) -> tuple:
+        """Order parameters r_q of the reference law, one array per q
+        (generic: invert the quantile grid, as in ref_cdf0)."""
+        S = 4096
+        p = (np.arange(S) + 0.5) / S
+        grid = self.ref_quantiles(data, p)            # (S, B)
+        return tuple(np.hypot(np.sin(q * grid).mean(axis=0),
+                              np.cos(q * grid).mean(axis=0)) for q in qs)
 
     # utilities
     @staticmethod
