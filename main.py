@@ -17,6 +17,7 @@ import dataclasses
 import json
 import time
 from pathlib import Path
+import copy
 
 import numpy as np
 import torch
@@ -26,7 +27,7 @@ from features import (Scaler,build_features,make_freqs,sig_dim,)
 from mdn import MDN, train_mdn
 from cylindrical import (Psi,attach_integrals,empirical_fourier,
             mdn_integrals,psi_xy,train_regressor,V_target,
-            V_target_nd,V_target_quantile,psi_dataset,make_psi_inputs)
+            V_target_nd,V_target_quantile,psi_dataset,make_psi_inputs, mlp)
 from evaluate import (make_baseline_figure,make_convergence_figure,
             make_figures,relative_l2,sw2_mc_floor,sw2_mdn_vs_ref,
             w2_mc_floor,w2_mdn_vs_ref)
@@ -99,6 +100,14 @@ def get_args():
                         "(identical data: same seed)")
     p.add_argument("--sweep-epochs", type=int, default=0,
                    help="epochs per K in the sweep (0 = mdn_epochs // 2)")
+    p.add_argument("--learned-baselines",action="store_true",
+                help="Train direct-functional and direct-Fourier baselines")
+    p.add_argument("--train-fraction",type=float,default=1.0,
+                help="Fraction of training scenarios; validation/test stay fixed",)
+    p.add_argument("--transfer-functional",choices=["moments", "quantile"],default="",
+                help="Optional second functional, with frozen representations")
+    p.add_argument("--transfer-fraction",type=float,default=1.0,
+                help="Fraction of training scenarios labelled for the new functional")
     return p.parse_args()
 
 
@@ -131,6 +140,26 @@ def main():
     if args.single_particle:
         run["k_keep"] = 1
     benchmark = get_benchmark(args.benchmark, **bench_params)
+    if not 0.0 < args.train_fraction <= 1.0:
+        raise ValueError("--train-fraction must be in (0, 1]")
+
+    if not 0.0 < args.transfer_fraction <= 1.0:
+        raise ValueError("--transfer-fraction must be in (0, 1]")
+
+    if args.transfer_functional:
+        if not args.learned_baselines:
+            raise ValueError(
+                "--transfer-functional requires --learned-baselines"
+            )
+        if args.empirical_targets:
+            raise ValueError(
+                "Transfer currently uses exact/reference-B labels"
+            )
+        if args.transfer_functional == args.functional:
+            raise ValueError("Source and target functionals must differ")
+        if args.transfer_functional == "quantile" and benchmark.d != 1:
+            raise ValueError("Quantile transfer requires d = 1")
+        
     M, N = run["M"], run["N"]
     #torch.set_num_threads(2)   # small tensors => limit CPU contention
 
@@ -190,6 +219,11 @@ def main():
     perm = rng.permutation(M)
     n_tr, n_va = int(0.7 * M), int(0.15 * M)
     itr, iva, ite = perm[:n_tr], perm[n_tr:n_tr + n_va], perm[n_tr + n_va:]
+
+    # Preserve the full training split before selecting a nested subset.
+    itr_all = itr.copy()
+    n_selected = max(1, int(len(itr_all) * args.train_fraction))
+    itr = itr_all[:n_selected]
 
     scaler = Scaler().fit(feats[itr])              # fit on TRAIN only
     Fs = scaler.transform(feats).astype(np.float32)
@@ -390,7 +424,16 @@ def main():
             functional=args.functional, empirical_targets=False
         )
 
-    xy_tr = shared_xy(d_tr, run["k_x"], eval_seeds[0])
+    # Generate evaluation states and labels for the full training split.
+    # This keeps retained examples identical across training fractions.
+    d_tr_all = benchmark.subset(data, itr_all)
+
+    x_tr_all, y_tr_all, k_tr = shared_xy(d_tr_all,run["k_x"],eval_seeds[0])
+
+    # Rows are ordered scenario by scenario, with k_tr points per scenario.
+    n_train_rows = len(itr) * k_tr
+    xy_tr = (x_tr_all[:n_train_rows],y_tr_all[:n_train_rows],k_tr,)
+
     xy_va = shared_xy(d_va, run["k_x"], eval_seeds[1])
     xy_te = shared_xy(d_te, run["k_x_test"], eval_seeds[2])
 
@@ -468,8 +511,208 @@ def main():
 
             rel_orc = relative_l2(psi_orc,Xo_te,yo_te)
 
+    # Learned baselines: shared scenarios, evaluation states, and labels.
+    rel_direct = rel_fourier = None
+    learned_hist = {}
+    learned_meta = {}
+
+    if args.learned_baselines:
+        def n_parameters(model):
+            return sum(p.numel() for p in model.parameters())
+
+        # A. Direct functional baseline: [x, z] -> V
+        direct_depth = run.get("direct_depth", 3)
+        direct_hidden = run.get("direct_hidden", run["hidden"])
+        direct_epochs = run.get("direct_epochs", run["psi_epochs"])
+
+        torch.manual_seed(args.seed + 100)
+
+        # Psi is an MLP: its second input block can also contain z.
+        direct = Psi(
+            n_integrals=F,
+            hidden=direct_hidden,
+            depth=direct_depth,
+            x_dim=benchmark.d,
+        )
+
+        (Xd_tr, yd_tr), (Xd_va, yd_va), (Xd_te, yd_te) = attach_three(
+            F_tr, F_va, F_te
+        )
+
+        print("[baseline] direct functional regression")
+        learned_hist["direct"], _ = train_regressor(
+            direct,
+            Xd_tr, yd_tr,
+            Xd_va, yd_va,
+            epochs=direct_epochs,
+            batch_size=1024,
+            lr=run["lr"],
+            seed=args.seed + 100,
+            show=False,
+        )
+
+        rel_direct = relative_l2(direct, Xd_te, yd_te)
+
+        # B. Direct Fourier baseline: z -> c_hat -> Psi(x, c_hat)
+
+        # Use the particles actually available to MDN training.
+        # This also respects --single-particle.
+        c_tr = empirical_fourier(
+            X_tr.detach().cpu().numpy(), freqs_np
+        )
+        c_va = empirical_fourier(
+            X_va.detach().cpu().numpy(), freqs_np
+        )
+
+        torch.manual_seed(args.seed + 101)
+        fourier_net = mlp(
+            F,
+            run["hidden"],
+            2 * len(freqs_np),
+            run["mdn_depth"],
+        )
+
+        print("[baseline] direct Fourier-statistic regression")
+        learned_hist["fourier_statistics"], _ = train_regressor(
+            fourier_net,
+            F_tr, c_tr,
+            F_va, c_va,
+            epochs=run["mdn_epochs"],
+            batch_size=run["batch"],
+            lr=run["lr"],
+            seed=args.seed + 101,
+            show=False,
+        )
+
+        # Freeze the representation before learning the functional.
+        fourier_net.eval()
+        fourier_net.requires_grad_(False)
+
+        with torch.no_grad():
+            fourier_tr = fourier_net(F_tr)
+            fourier_va = fourier_net(F_va)
+            fourier_te = fourier_net(F_te)
+
+        (Xf_tr, yf_tr), (Xf_va, yf_va), (Xf_te, yf_te) = attach_three(
+            fourier_tr, fourier_va, fourier_te
+        )
+
+        torch.manual_seed(args.seed + 102)
+        psi_fourier = Psi(
+            n_integrals=2 * len(freqs_np),
+            hidden=run["hidden"],
+            depth=run["psi_depth"],
+            x_dim=benchmark.d,
+        )
+
+        learned_hist["psi_fourier"], _ = train_regressor(
+            psi_fourier,
+            Xf_tr, yf_tr,
+            Xf_va, yf_va,
+            epochs=run["psi_epochs"],
+            batch_size=1024,
+            lr=run["lr"],
+            seed=args.seed + 102,
+            show=False,
+        )
+
+        rel_fourier = relative_l2(psi_fourier, Xf_te, yf_te)
+
+        learned_meta = {
+            "fourier_target_source": "same_XT_particles_as_MDN",
+            "fourier_particles_per_scenario": int(X_tr.shape[1]),
+            "direct_depth": direct_depth,
+            "direct_hidden": direct_hidden,
+            "direct_epochs": direct_epochs,
+            "seed_offsets": {
+                "direct": 100,
+                "fourier": 101,
+                "psi_fourier": 102,
+            },
+            "parameters": {
+                "mdn_pipeline": n_parameters(mdn) + n_parameters(psi),
+                "direct": n_parameters(direct),
+                "fourier_pipeline": (
+                    n_parameters(fourier_net)
+                    + n_parameters(psi_fourier)
+                ),
+            },
+        }
+
     rel_full = relative_l2(psi, Xin_te, y_te)
     functional_ref_floor = None
+
+    transfer_metrics = {}
+    transfer_protocol = {}
+
+    if args.transfer_functional:
+        target_functional = args.transfer_functional
+        target_labels = []
+
+        # Reuse exactly the same evaluation states; change only the labels.
+        for dd, xy in zip((d_tr, d_va, d_te),(xy_tr, xy_va, xy_te)):
+            if target_functional == "quantile":
+                q = benchmark.target_quantiles(dd, np.array([0.25, 0.75]))
+                a = q[1] - q[0]
+                b = benchmark.target_cdf0(dd)
+            else:
+                a, b = benchmark.target_moments(dd)
+
+            shape = ((len(dd["XT"]), xy[2])+ dd["XT"].shape[2:])
+            x_same = xy[0].numpy().reshape(shape)
+
+            # k_x=0 retains every supplied point: no new state draw.
+            _, target_y, _ = psi_xy(x_same,a, b,0,np.random.default_rng(0),
+                        functional=target_functional,empirical_targets=False)
+            target_labels.append(target_y)
+
+        yt_tr, yt_va, yt_te = target_labels
+
+        n_target = max(1, int(len(itr) * args.transfer_fraction))
+        # Dataset rows are ordered scenario by scenario.
+        n_rows = n_target * xy_tr[2]
+
+        transfer_protocol = {"source_functional": args.functional,
+            "target_functional": target_functional,
+            "n_source_train_scenarios": len(itr),
+            "n_target_train_scenarios": n_target,
+            "n_target_training_pairs": n_rows,
+            "n_target_validation_scenarios": len(iva),
+            "representation_training": (
+                "frozen; no target-functional retraining")}
+
+        # Inputs already contain the same x states.
+        # Their representation blocks are fixed tensors.
+        channels = {
+            "mdn": (Xin_tr, Xin_va, Xin_te),
+            "fourier": (Xf_tr, Xf_va, Xf_te),
+            "direct": (Xd_tr, Xd_va, Xd_te),
+            "direct_finetuned": (Xd_tr, Xd_va, Xd_te)}
+
+        for name, (Xt_tr, Xt_va, Xt_te) in channels.items():
+            torch.manual_seed(args.seed + 200)
+
+            if name == "direct_finetuned":
+                model = copy.deepcopy(direct)
+            else:
+                is_direct = name == "direct"
+                model = Psi(n_integrals=(
+                        F if is_direct else 2 * len(freqs_np)),
+                    hidden=(direct_hidden if is_direct else run["hidden"]),
+                    depth=(direct_depth if is_direct else run["psi_depth"]),
+                    x_dim=benchmark.d)
+
+            history, _ = train_regressor(model,Xt_tr[:n_rows], yt_tr[:n_rows],
+                Xt_va, yt_va,epochs=run["psi_epochs"],batch_size=1024,
+                lr=run["lr"],seed=args.seed + 200,show=False)
+
+            error = relative_l2(model, Xt_te, yt_te)
+            transfer_metrics[f"rel_l2_transfer_{name}"] = error
+            learned_hist[f"transfer_{name}"] = history
+
+            print(f"[transfer {target_functional}] {name}: {100 * error:.2f}%")
+
+
 
     pair = benchmark.independent_target_pair(
         d_te,
@@ -530,6 +773,9 @@ def main():
                                 else "independent-reference integrals")
 
     print(f"     {reference_baseline_label:31s}: {pct(rel_orc)}")
+    if args.learned_baselines:
+        print(f"     direct functional               : {pct(rel_direct)}")
+        print(f"     direct Fourier + Psi            : {pct(rel_fourier)}")
 
     if functional_ref_floor is not None:
         print(f"reference-label variability diagnostic: {100 * functional_ref_floor:.2f}%")
@@ -542,11 +788,17 @@ def main():
     make_figures(outdir, benchmark, d_te, mdn, F_te, hist_mdn, hist_psi,
                  w2_model, w2_floor)
     make_convergence_figure(outdir,hist_mdn,hist_psi)
-    if args.baselines == "full":
-        make_baseline_figure(outdir, benchmark, {
+
+    if args.baselines == "full" or args.learned_baselines:
+        baseline_errors = {
             f"empirical plug-in ($N$={N})": rel_emp,
-            "MDN pipeline (ours)": rel_full,
-            reference_baseline_label: rel_orc})
+            "MDN pipeline": rel_full,
+            "Direct functional": rel_direct,
+            "Direct Fourier + Psi": rel_fourier,
+            reference_baseline_label: rel_orc}
+        make_baseline_figure(outdir,benchmark,
+            {name: error  for name, error in baseline_errors.items()
+                if error is not None})
 
     _f = lambda v: None if v is None else float(v)
     metrics = dict(
@@ -572,6 +824,12 @@ def main():
         mdn_beats_floor=bool(beats),
         reference_resolution=(float(ref_res) if ref_res is not None else None),
         rel_l2_full=float(rel_full),
+        rel_l2_direct=_f(rel_direct),
+        rel_l2_fourier=_f(rel_fourier),
+        learned_baselines=learned_meta,
+        transfer_protocol=transfer_protocol,
+        training_subset=dict(fraction=args.train_fraction,n_train_scenarios=len(itr),
+            train_indices=itr.tolist(),validation_indices=iva.tolist(),test_indices=ite.tolist()),
         rel_l2_empirical=_f(rel_emp), rel_l2_oracle=_f(rel_orc),
         sweep_kkeep=sweep_results,
         runtime_sec=round(time.time() - t0, 1),
@@ -583,12 +841,15 @@ def main():
         n_ref_per_replicate=(int(benchmark.p.n_ref) if hasattr(benchmark.p, "n_ref") else None),
         n_ref_pooled=(2 * int(benchmark.p.n_ref) if hasattr(benchmark.p, "n_ref") else None),
         reference_ab_w2_mean=ref_ab_w2,reference_resolution_kind=(None if ref_res is None else "heuristic_half_mean_AB_distance"),)
+
+    metrics.update(transfer_metrics)
     
     with open(outdir / "metrics.json", "w") as f:
         json.dump(metrics, f, indent=2)
 
     with open(outdir / "training_history.json", "w") as file:
-        json.dump({"mdn": hist_mdn,"psi": hist_psi},file, indent=2)
+            json.dump({"mdn": hist_mdn,"psi": hist_psi,
+                    **learned_hist},file,indent=2)
 
     print("\n" + "=" * 72)
     print("SUMMARY")
@@ -599,7 +860,7 @@ def main():
         print(f"  Unscaled A/B W2 discrepancy: {ref_ab_w2:.4f}")
     print(f"empirical plug-in {pct(rel_emp).strip()}  |  "
           f"MDN pipeline {pct(rel_full).strip()}  |  "
-          f"oracle {pct(rel_orc).strip()}")
+          f"{reference_baseline_label} {pct(rel_orc).strip()}")
     print(f"  Figures + metrics.json: {outdir}/   "
           f"({metrics['runtime_sec']}s)")
     print("=" * 72)

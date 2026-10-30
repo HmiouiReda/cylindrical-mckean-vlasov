@@ -340,7 +340,8 @@ def make_baseline_figure(outdir, benchmark: Benchmark, rel_errors: dict):
     empirical plug-in, MDN pipeline, oracle integrals."""
     labels = list(rel_errors.keys())
     vals = [100.0 * v for v in rel_errors.values()]
-    colors = ["tab:gray", "tab:blue", "tab:red", "tab:green"][:len(labels)]
+    colors = ["tab:gray","tab:blue","tab:orange",
+                "tab:purple","tab:green"][:len(labels)]
     plt.figure(figsize=(7.2, 3.4))
     ypos = np.arange(len(labels))[::-1]
     bars = plt.barh(ypos, vals, color=colors, alpha=0.85)
@@ -351,8 +352,7 @@ def make_baseline_figure(outdir, benchmark: Benchmark, rel_errors: dict):
                  va="center", fontsize=9)
     plt.xlim(right=max(vals) * 4.0)
     plt.xlabel(r"relative $L^2$ error of $\widehat V$ (%, log scale)")
-    plt.title(f"{benchmark.pretty}: what feeds the measure channel of "
-              r"$\Psi$")
+    plt.title(f"{benchmark.pretty}: functional prediction")
     plt.tight_layout()
     plt.savefig(f"{outdir}/fig5_baselines.png", dpi=130)
     plt.close()
