@@ -1,6 +1,7 @@
 
 # Virtual environments
 .Mckean/
+.venv/
 
 # Python
 __pycache__/
@@ -11,6 +12,7 @@ __pycache__/
 
 # IDE / OS
 .vscode/
+.claude/
 
 # Experiment outputs
 outputs/*

@@ -6,7 +6,7 @@ reference_resolution estimates the reference's own W2 sampling error by a
 half-sample split, so every reported W2 can be read relative to it"""
 
 import numpy as np
-from .base import Benchmark
+from .base import Benchmark, order_parameters
 
 
 class ParticleReferenceBenchmark(Benchmark):
@@ -111,6 +111,16 @@ class ParticleReferenceBenchmark(Benchmark):
         _, B = self._replicates(data)
         return (B <= 0.0).mean(axis=1)
 
+    def ref_order(self, data: dict, qs=(1, 2)) -> tuple:
+        """Order parameters of the pooled reference."""
+        Xr = self._pooled_reference(data)
+        return tuple(order_parameters(Xr, q) for q in qs)
+
+    def target_order(self, data: dict, qs=(1, 2)) -> tuple:
+        """Regression-label order parameters from replicate B only."""
+        _, B = self._replicates(data)
+        return tuple(order_parameters(B, q) for q in qs)
+
     def independent_target_pair(self,data: dict,functional: str,):
         """Target statistics built independently from A and B."""
         A, B = self._replicates(data)
@@ -130,6 +140,13 @@ class ParticleReferenceBenchmark(Benchmark):
             qb = np.quantile(B, [0.25, 0.75], axis=1)
             target_a = (qa[1] - qa[0],(A <= 0.0).mean(axis=1))
             target_b = (qb[1] - qb[0],(B <= 0.0).mean(axis=1))
+            return target_a, target_b
+
+        if functional == "order":
+            if A.ndim != 2:
+                raise ValueError("order functional is one-dimensional")
+            target_a = (order_parameters(A, 1), order_parameters(A, 2))
+            target_b = (order_parameters(B, 1), order_parameters(B, 2))
             return target_a, target_b
 
         raise ValueError(f"unknown functional '{functional}'")

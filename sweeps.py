@@ -49,7 +49,7 @@ def get_args():
     parser.add_argument(
         "--functional",
         default="moments",
-        choices=["moments", "quantile"],
+        choices=["moments", "quantile", "order"],
     )
     parser.add_argument(
         "--outdir",
