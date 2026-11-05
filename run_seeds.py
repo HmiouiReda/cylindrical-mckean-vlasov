@@ -16,9 +16,11 @@ from pathlib import Path
 
 import numpy as np
 
-HEADLINE = ["mdn_val_nll", "w2_mdn_mean", "w2_floor_mean",
-            "rel_l2_full", "rel_l2_empirical","rel_l2_oracle", 
-            "reference_resolution"]
+HEADLINE = ["mdn_val_nll","w2_mdn_mean","w2_floor_mean",
+    "rel_l2_full","rel_l2_empirical","rel_l2_oracle",
+    "rel_l2_direct","rel_l2_fourier","rel_l2_transfer_mdn",
+    "rel_l2_transfer_fourier","rel_l2_transfer_direct",
+    "rel_l2_transfer_direct_finetuned","reference_resolution"]
 
 
 def main():
