@@ -1,0 +1,4 @@
+#!/bin/bash
+# c compiler without -fstack-clash-protection, which gcc < 8 rejects
+a=(); for x in "$@"; do [ "$x" = -fstack-clash-protection ] || a+=("$x"); done
+exec cc "${a[@]}"
