@@ -115,6 +115,10 @@ def get_args():
                 help="Optional second functional, with frozen representations")
     p.add_argument("--transfer-fraction",type=float,default=1.0,
                 help="Fraction of training scenarios labelled for the new functional")
+    p.add_argument("--save-model", type=int, nargs="?", const=100, default=0,
+                metavar="K",
+                help="save the MDN and the first K test and train scenarios "
+                     "to <outdir>/model for error_sources.py (default K = 100)")
     return p.parse_args()
 
 
@@ -135,6 +139,37 @@ def load_config(args):
         if v:
             run[key] = v
     return bench, run
+
+
+def save_model(path, mdn, benchmark, args, run, F_te, d_te, w2_te,
+               F_tr, d_tr, K):
+    """Write the MDN and the first K test and train scenarios to `path`.
+
+    Features are saved standardized, so error_sources.py never rebuilds
+    them.  Draws no random numbers.
+    """
+    path.mkdir(parents=True, exist_ok=True)
+    torch.save(mdn.state_dict(), path / "mdn.pt")
+    k_te, k_tr = min(K, len(F_te)), min(K, len(F_tr))
+    arrays = {"test__feats": F_te[:k_te].numpy(),
+              "train__feats": F_tr[:k_tr].numpy(),
+              "test__w2_mdn": np.asarray(w2_te[:k_te])}
+    for split, dd, k in (("test", d_te, k_te), ("train", d_tr, k_tr)):
+        sub = benchmark.subset(dd, np.arange(k))
+        for key, v in sub.items():
+            # the training cloud is not needed and is the largest array
+            if isinstance(v, np.ndarray) and key not in ("XT", "X_ref"):
+                arrays[f"{split}__{key}"] = v
+    np.savez_compressed(path / "scenarios.npz", **arrays)
+    meta = dict(benchmark=args.benchmark, seed=args.seed,
+                benchmark_params={f.name: getattr(benchmark.p, f.name)
+                                  for f in dataclasses.fields(benchmark.p)},
+                mdn=dict(in_dim=int(F_te.shape[1]), hidden=run["hidden"],
+                         J=run["J"], depth=run["mdn_depth"], d=benchmark.d),
+                S_quant=run["S_quant"], N=run["N"], M=run["M"],
+                k_test=k_te, k_train=k_tr)
+    (path / "meta.json").write_text(json.dumps(meta, indent=2))
+    print(f"[save-model] MDN + {k_te} test / {k_tr} train scenarios -> {path}")
 
 
 def main():
@@ -392,6 +427,11 @@ def main():
     if ref_ab_w2 is not None:
         print(f"[W2] unscaled A/B replicate discrepancy = {ref_ab_w2:.4f}")
         print(f"[W2] heuristic pooled-reference scale = {ref_res:.4f}")
+    if args.save_model:
+        with timings.stage("save_model"):
+            save_model(outdir / "model", mdn, benchmark, args, run,
+                       F_te, d_te, w2_model, F_tr, d_tr, args.save_model)
+
     # ---- optional: K_keep sweep -------------------------------------------
     with timings.stage("sweep_kkeep"):
         sweep_results = run_sweep() if args.sweep_kkeep else {}
@@ -909,7 +949,7 @@ def main():
         if group in timings.data:
             timings.set(f"{group}.total", sum(timings.data[group].values()))
     timings.finish(["simulate.total", "features", "eval_points.total",
-                    "mdn_train.total", "psi_train", "evaluation",
+                    "mdn_train.total", "save_model", "psi_train", "evaluation",
                     "comparisons.total", "inference.measurement",
                     "sweep_kkeep", "figures"])
 
