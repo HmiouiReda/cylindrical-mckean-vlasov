@@ -13,8 +13,11 @@ export CC=$T/cc-nosc CXX=$T/cxx-nosc
 export LDSHARED="$T/cc-nosc -shared" LDCXXSHARED="$T/cxx-nosc -shared"
 
 [ -d .venv ] || uv venv --python 3.12
-# newest versions with builds for glibc 2.17, checked on pypi 2026-11-06
-uv pip install "numpy<2.3" setuptools
+# only ready-made builds: uv then picks the newest version of each package
+# that has one for this system's glibc, instead of compiling it here
+uv pip install --only-binary :all: numpy setuptools
+# iisignature has no ready-made build, so it is compiled
 uv pip install --no-build-isolation iisignature
-uv pip install "torch==2.5.1" "matplotlib<3.11" "pillow<13" pytest
+# torch held at 2.5.1: later versions need glibc 2.28 (2.6's label is unclear)
+uv pip install --only-binary :all: "torch==2.5.1" matplotlib pytest
 .venv/bin/python -c "import torch, numpy, iisignature, matplotlib; print('setup ok: torch', torch.__version__, 'numpy', numpy.__version__)"
