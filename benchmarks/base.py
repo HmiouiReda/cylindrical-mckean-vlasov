@@ -25,6 +25,32 @@ def order_parameters(cloud: np.ndarray, q: int = 1) -> np.ndarray:
     return np.hypot(s, c)
 
 
+def refine_path(W0: np.ndarray, times: np.ndarray, r: int,
+                rng: np.random.Generator) -> tuple[np.ndarray, np.ndarray]:
+    """Refine common-noise paths r-fold by a Brownian bridge.
+
+    Inside each coarse step the r fine increments are drawn from their exact
+    law given the coarse increment, so the fine path passes through every
+    coarse point.  W0: (M, n+1), times: (n+1,) -> (M, n*r+1), (n*r+1,).
+    """
+    M, n = W0.shape[0], W0.shape[1] - 1
+    dt = np.diff(times)                                       # (n,)
+    inc = np.diff(W0, axis=1)                                 # (M, n)
+    z = rng.standard_normal((M, n, r)) * np.sqrt(dt / r)[None, :, None]
+    # iid increments conditioned on their sum: subtract the mean, add inc/r
+    z = z - z.mean(axis=2, keepdims=True) + inc[:, :, None] / r
+    W0_fine = np.empty((M, n * r + 1))
+    W0_fine[:, 0] = W0[:, 0]
+    W0_fine[:, 1:] = W0[:, :1] + np.cumsum(z.reshape(M, n * r), axis=1)
+    # put the coarse points back exactly, removing cumsum rounding
+    W0_fine[:, ::r] = W0
+    sub = np.arange(1, r + 1) / r
+    times_fine = np.concatenate(
+        [times[:1], (times[:-1, None] + dt[:, None] * sub[None, :]).ravel()])
+    times_fine[::r] = times
+    return W0_fine, times_fine
+
+
 class Benchmark(ABC):
     name: str = "base"
     pretty: str = "benchmark"  #name for printing
