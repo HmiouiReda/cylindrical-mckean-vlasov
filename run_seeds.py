@@ -23,6 +23,18 @@ HEADLINE = ["mdn_val_nll","w2_mdn_mean","w2_floor_mean",
     "rel_l2_transfer_direct_finetuned","reference_resolution"]
 
 
+def _flatten(node: dict, prefix: str = "") -> dict:
+    out = {}
+    for k, v in node.items():
+        if k == "environment":
+            continue
+        if isinstance(v, dict):
+            out.update(_flatten(v, f"{prefix}{k}."))
+        elif isinstance(v, (int, float)) and not isinstance(v, bool):
+            out[prefix + k] = v
+    return out
+
+
 def main():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--benchmark", type=str, required=True)
@@ -63,6 +75,19 @@ def main():
                                  "std": float(vals.std(ddof=1)),
                                  "values": vals.tolist()}
         print(f"  {k:22s}: {vals.mean():.4f} +/- {vals.std(ddof=1):.4f}")
+    # timings: mean +/- std of every numeric leaf, machine details excluded
+    flat = [_flatten(per_seed[s].get("timings", {})) for s in seeds]
+    keys = [k for k in flat[0] if all(k in f for f in flat)]
+    summary["timings"] = {}
+    for k in keys:
+        vals = np.asarray([f[k] for f in flat], dtype=float)
+        summary["timings"][k] = {"mean": float(vals.mean()),
+                                 "std": float(vals.std(ddof=1)),
+                                 "values": vals.tolist()}
+    for k in ("simulate.total", "mdn_train.total", "psi_train", "total"):
+        if k in summary["timings"]:
+            v = summary["timings"][k]
+            print(f"  time {k:17s}: {v['mean']:.1f} +/- {v['std']:.1f} s")
     (root / "summary.json").write_text(json.dumps(summary, indent=2))
     print(f"\nWritten to {root/'summary.json'}")
 
