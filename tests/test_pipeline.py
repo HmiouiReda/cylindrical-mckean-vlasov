@@ -26,7 +26,31 @@ def _check_outputs(outdir: Path):
         assert isinstance(metrics[k], float)
     for f in FIGS:
         assert (outdir / f).exists(), f"missing figure {f}"
+    _check_timings(metrics)
     return metrics
+
+
+def _leaves(node):
+    for v in node.values():
+        if isinstance(v, dict):
+            yield from _leaves(v)
+        elif isinstance(v, (int, float)) and not isinstance(v, bool):
+            yield v
+
+
+def _check_timings(metrics: dict):
+    t = metrics["timings"]
+    timed = {k: v for k, v in t.items() if k != "environment"}
+    assert all(v >= 0 for v in _leaves(timed))
+    # the disjoint stages cover the run, up to a small untimed rest
+    assert 0 <= t["other"] <= 0.05 * t["total"]
+    assert abs(metrics["runtime_sec"] - round(t["total"], 1)) < 1e-9
+    sim = t["simulate"]
+    parts = sum(sim.get(k, 0.0) for k in ("train_cloud", "ref_A", "ref_B"))
+    assert parts <= sim["total"] + 1e-9
+    for key in ("batched_per_scenario", "single_scenario_latency",
+                "features_per_scenario"):
+        assert t["inference"][key] > 0
 
 
 def test_pipeline_ou_smoke(tmp_path):

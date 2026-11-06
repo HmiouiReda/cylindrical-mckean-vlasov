@@ -42,6 +42,8 @@ from dataclasses import dataclass
 
 import numpy as np
 
+from timing import SimClock
+
 from .particle_ref import ParticleReferenceBenchmark
 
 
@@ -136,12 +138,16 @@ class Kuramoto(ParticleReferenceBenchmark):
         XB = m0[:, None] + s0[:, None] * rng.standard_normal((M, n_b))
         W0 = np.zeros((M, p.n_steps + 1))
 
+        clock = SimClock()
         for k in range(p.n_steps):
             # Same common noise, independent idiosyncratic noises.
             dW0 = sqdt * rng.standard_normal((M, 1))
-            X = self.step(X, sqdt * rng.standard_normal((M, N)), dW0, dt)
-            XA = self.step(XA, sqdt * rng.standard_normal((M, n_a)), dW0, dt)
-            XB = self.step(XB, sqdt * rng.standard_normal((M, n_b)), dW0, dt)
+            X = clock.run("train_cloud", lambda: self.step(
+                X, sqdt * rng.standard_normal((M, N)), dW0, dt))
+            XA = clock.run("ref_A", lambda: self.step(
+                XA, sqdt * rng.standard_normal((M, n_a)), dW0, dt))
+            XB = clock.run("ref_B", lambda: self.step(
+                XB, sqdt * rng.standard_normal((M, n_b)), dW0, dt))
             W0[:, k + 1] = W0[:, k] + dW0[:, 0]
 
         times = np.linspace(0.0, p.T, p.n_steps + 1)
@@ -150,7 +156,7 @@ class Kuramoto(ParticleReferenceBenchmark):
                 "X_ref_input": np.ascontiguousarray(XA),
                 "X_ref_target": np.ascontiguousarray(XB),
                 "X_ref": np.ascontiguousarray(np.concatenate([XA, XB], axis=1)),
-                "times": times}
+                "times": times, "sim_seconds": clock.result()}
 
     def ito_stratonovich_check(self, M: int, N: int,
                                rng: np.random.Generator) -> dict:

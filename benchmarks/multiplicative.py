@@ -30,6 +30,8 @@ The Heun predictor-corrector converges to the Stratonovich integral
 
 from dataclasses import dataclass
 import numpy as np
+
+from timing import SimClock
 from .particle_ref import ParticleReferenceBenchmark
 
 
@@ -109,20 +111,25 @@ class MultiplicativeOU(ParticleReferenceBenchmark):
             return (U + p.a * (cond_mean - U) * dt
                 + p.sigma * dB+ self.sigma0(U) * dW0)
 
+        clock = SimClock()
         for k in range(p.n_steps):
             # Same common noise.
             dW0 = sqdt * rng.standard_normal((M, 1))
 
-            X = step(X,sqdt * rng.standard_normal((M, N)),dW0)
-            XA = step(XA,sqdt * rng.standard_normal((M, n_a)),dW0)
-            XB = step(XB,sqdt * rng.standard_normal((M, n_b)),dW0)
+            X = clock.run("train_cloud", lambda: step(
+                X, sqdt * rng.standard_normal((M, N)), dW0))
+            XA = clock.run("ref_A", lambda: step(
+                XA, sqdt * rng.standard_normal((M, n_a)), dW0))
+            XB = clock.run("ref_B", lambda: step(
+                XB, sqdt * rng.standard_normal((M, n_b)), dW0))
             W0[:, k + 1] = W0[:, k] + dW0[:, 0]
 
         times = np.linspace(0.0, p.T, p.n_steps + 1)
 
         return {"m0": m0,"s0": s0,"W0": W0,"XT": np.ascontiguousarray(X),
             "X_ref_input": np.ascontiguousarray(XA),"X_ref_target": np.ascontiguousarray(XB),
-            "X_ref": np.ascontiguousarray(np.concatenate([XA, XB], axis=1)),"times": times}
+            "X_ref": np.ascontiguousarray(np.concatenate([XA, XB], axis=1)),"times": times,
+            "sim_seconds": clock.result()}
 
 
     def ito_stratonovich_check(self, M: int, N: int,

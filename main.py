@@ -16,6 +16,8 @@ import argparse
 import dataclasses
 import json
 import time
+
+from timing import Timings, environment
 from pathlib import Path
 import copy
 
@@ -137,7 +139,8 @@ def load_config(args):
 
 def main():
     args = get_args()
-    t0 = time.time()
+    timings = Timings()
+    env_start = environment()
     outdir = Path(args.outdir) if args.outdir else Path("outputs") / args.benchmark
     outdir.mkdir(parents=True, exist_ok=True)
 
@@ -207,21 +210,30 @@ def main():
         return
 
     # ---- simulation -------------------------------------------------------
-    t = time.time()
-    data = benchmark.simulate(M, N, rng)
+    with timings.stage("simulate.total"):
+        data = benchmark.simulate(M, N, rng)
+    # per-system split from inside simulate; one-system benchmarks have none
+    sim_seconds = data.get("sim_seconds")
+    if sim_seconds is None:
+        timings.set("simulate.train_cloud", timings.data["simulate"]["total"])
+    else:
+        for key in ("train_cloud", "ref_A", "ref_B"):
+            timings.set(f"simulate.{key}", sim_seconds[key])
     extra = (f", N_ref={benchmark.p.n_ref}"
              if hasattr(benchmark.p, "n_ref") else "")
-    print(f"[simulate] {M}x{N} particles{extra} in {time.time() - t:.1f}s")
+    print(f"[simulate] {M}x{N} particles{extra} in "
+          f"{timings.data['simulate']['total']:.1f}s")
 
     # ---- features + split + standardisation -------------------------------
-    t = time.time()
-    freqs_np = make_freqs(run["n_fourier"], d=benchmark.d)
-    feats = build_features(data,run["sig_level"],freqs=freqs_np)
+    with timings.stage("features"):
+        freqs_np = make_freqs(run["n_fourier"], d=benchmark.d)
+        feats = build_features(data,run["sig_level"],freqs=freqs_np)
     F = feats.shape[1]
     n_fourier_features = 2 * len(freqs_np)
 
     print(f"[features] dimension = {F} ({n_fourier_features} Fourier + "
-        f"{sig_dim(run['sig_level'])} signature) in {time.time() - t:.1f}s")
+        f"{sig_dim(run['sig_level'])} signature) in "
+        f"{timings.data['features']:.1f}s")
 
     perm = rng.permutation(M)
     n_tr, n_va = int(0.7 * M), int(0.15 * M)
@@ -232,8 +244,9 @@ def main():
     n_selected = max(1, int(len(itr_all) * args.train_fraction))
     itr = itr_all[:n_selected]
 
-    scaler = Scaler().fit(feats[itr])              # fit on TRAIN only
-    Fs = scaler.transform(feats).astype(np.float32)
+    with timings.stage("features"):
+        scaler = Scaler().fit(feats[itr])          # fit on TRAIN only
+        Fs = scaler.transform(feats).astype(np.float32)
     zva = Fs[iva]
     print(f"[features] standardisation check (val): "
           f"max |mean| = {np.abs(zva.mean(0)).max():.3f}, "
@@ -306,7 +319,7 @@ def main():
         metrics["sweep_kkeep"] = sweep_results
         mfile.write_text(json.dumps(metrics, indent=2))
         print(f"[sweep] results merged into {mfile} "
-              f"({round(time.time() - t0, 1)}s)")
+              f"({round(timings.elapsed(), 1)}s)")
         return
 
     # ---- optional: deliberate overfit test (gradient-flow sanity) ---------
@@ -347,12 +360,15 @@ def main():
 
     def validation_distribution_error(model):
         """Mean validation W2 on a small fixed subset."""
-        errors = model_w2(model,F_curve, d_curve,S=run["curve_quantiles"],)
+        # diagnostic only; its share of mdn_train is reported separately
+        with timings.stage("mdn_train.curve_diagnostic"):
+            errors = model_w2(model,F_curve, d_curve,S=run["curve_quantiles"],)
         return errors.mean()
 
-    hist_mdn, best_nll = train_mdn(mdn,F_tr,X_tr,F_va,X_va,epochs=run["mdn_epochs"],
-        batch_size=run["batch"],lr=run["lr"],k_keep=run["k_keep"],seed=args.seed,
-        eval_error_fn=validation_distribution_error,eval_every=run["curve_every"])
+    with timings.stage("mdn_train.total"):
+        hist_mdn, best_nll = train_mdn(mdn,F_tr,X_tr,F_va,X_va,epochs=run["mdn_epochs"],
+            batch_size=run["batch"],lr=run["lr"],k_keep=run["k_keep"],seed=args.seed,
+            eval_error_fn=validation_distribution_error,eval_every=run["curve_every"])
     mdn.eval()
     floor = benchmark.entropy_floor(data)
     msg = (f"(entropy floor 0.5 log(2 pi e v_T) = {floor:.4f})"
@@ -360,22 +376,25 @@ def main():
     print(f"[MDN] best val NLL = {best_nll:.4f} {msg}")
 
     # ---- W2 vs Monte-Carlo floor ------------------------------------------
-    w2_model = model_w2(mdn, F_te, d_te)
-    w2_floor = mc_w2_floor(d_te)
+    with timings.stage("evaluation"):
+        w2_model = model_w2(mdn, F_te, d_te)
+        w2_floor = mc_w2_floor(d_te)
 
     beats = w2_model.mean() < w2_floor.mean()
     w2_name = "sliced W2" if benchmark.d == 2 else "W2"
     print(f"[{w2_name}] MDN = {w2_model.mean():.4f} +/- {w2_model.std():.4f}   |   "
           f"MC floor (N={N}) = {w2_floor.mean():.4f} +/- {w2_floor.std():.4f}"
           f"   =>  MDN beats the floor: {'YES' if beats else 'NO'}")
-    ref_res = benchmark.reference_resolution(d_te)
+    with timings.stage("evaluation"):
+        ref_res = benchmark.reference_resolution(d_te)
     # The current reference_resolution implementation returns mean W2(A, B) / 2.
     ref_ab_w2 = None if ref_res is None else 2.0 * ref_res
     if ref_ab_w2 is not None:
         print(f"[W2] unscaled A/B replicate discrepancy = {ref_ab_w2:.4f}")
         print(f"[W2] heuristic pooled-reference scale = {ref_res:.4f}")
     # ---- optional: K_keep sweep -------------------------------------------
-    sweep_results = run_sweep() if args.sweep_kkeep else {}
+    with timings.stage("sweep_kkeep"):
+        sweep_results = run_sweep() if args.sweep_kkeep else {}
 
     # ---- cylindrical network Psi ------------------------------------------
     print("\n[Psi] closed-form <phi, mixture> integration + MSE training "
@@ -440,14 +459,17 @@ def main():
     # This keeps retained examples identical across training fractions.
     d_tr_all = benchmark.subset(data, itr_all)
 
-    x_tr_all, y_tr_all, k_tr = shared_xy(d_tr_all,run["k_x"],eval_seeds[0])
+    with timings.stage("eval_points.train"):
+        x_tr_all, y_tr_all, k_tr = shared_xy(d_tr_all,run["k_x"],eval_seeds[0])
 
     # Rows are ordered scenario by scenario, with k_tr points per scenario.
     n_train_rows = len(itr) * k_tr
     xy_tr = (x_tr_all[:n_train_rows],y_tr_all[:n_train_rows],k_tr,)
 
-    xy_va = shared_xy(d_va, run["k_x"], eval_seeds[1])
-    xy_te = shared_xy(d_te, run["k_x_test"], eval_seeds[2])
+    with timings.stage("eval_points.validation"):
+        xy_va = shared_xy(d_va, run["k_x"], eval_seeds[1])
+    with timings.stage("eval_points.test"):
+        xy_te = shared_xy(d_te, run["k_x_test"], eval_seeds[2])
 
     def attach_three(ints_tr, ints_va, ints_te):
         datasets = []
@@ -459,18 +481,19 @@ def main():
             datasets.append((X_psi, y_tensor))
         return datasets
 
-    # MDN measure representations.
-    mdn_tr = mdn_integrals(mdn, F_tr, freqs_t)
-    mdn_va = mdn_integrals(mdn, F_va, freqs_t)
-    mdn_te = mdn_integrals(mdn, F_te, freqs_t)
+    with timings.stage("psi_train"):
+        # MDN measure representations.
+        mdn_tr = mdn_integrals(mdn, F_tr, freqs_t)
+        mdn_va = mdn_integrals(mdn, F_va, freqs_t)
+        mdn_te = mdn_integrals(mdn, F_te, freqs_t)
 
-    ((Xin_tr, y_tr),(Xin_va, y_va),(Xin_te, y_te)) = attach_three(mdn_tr,mdn_va,mdn_te)
+        ((Xin_tr, y_tr),(Xin_va, y_va),(Xin_te, y_te)) = attach_three(mdn_tr,mdn_va,mdn_te)
 
-    psi = Psi(n_integrals=2 * len(freqs_np),hidden=run["hidden"],
-                depth=run["psi_depth"],x_dim=benchmark.d)
-    hist_psi, _ = train_regressor(psi, Xin_tr, y_tr, Xin_va, y_va,
-                                  epochs=run["psi_epochs"], batch_size=1024,
-                                  lr=run["lr"], seed=args.seed)
+        psi = Psi(n_integrals=2 * len(freqs_np),hidden=run["hidden"],
+                    depth=run["psi_depth"],x_dim=benchmark.d)
+        hist_psi, _ = train_regressor(psi, Xin_tr, y_tr, Xin_va, y_va,
+                                      epochs=run["psi_epochs"], batch_size=1024,
+                                      lr=run["lr"], seed=args.seed)
 
     # ---- measure-representation comparisons for V-hat ------------------------
     # The regression target is unchanged. The variants differ only through the
@@ -493,6 +516,7 @@ def main():
 
 
     if args.baselines in ("full", "emp"):
+        timings.start("comparisons.empirical")
         print(f"[comparisons] empirical plug-in <phi, mu_hat_N> "
               f"(N={N} particles per scenario)")
         (Xe_tr, ye_tr), (Xe_va, ye_va), (Xe_te, ye_te) = variant_sets(
@@ -503,8 +527,10 @@ def main():
                         epochs=run["psi_epochs"], batch_size=1024,
                         lr=run["lr"], seed=args.seed,show=False)
         rel_emp = relative_l2(psi_emp, Xe_te, ye_te)
+        timings.stop("comparisons.empirical")
 
         if args.baselines == "full":
+            timings.start("comparisons.oracle")
             reference_baseline_label = ("oracle integrals" if benchmark.has_closed_form
                                     else "independent-reference integrals")
 
@@ -522,6 +548,7 @@ def main():
                 lr=run["lr"],seed=args.seed,show=False,)
 
             rel_orc = relative_l2(psi_orc,Xo_te,yo_te)
+            timings.stop("comparisons.oracle")
 
     # Learned baselines: shared scenarios, evaluation states, and labels.
     rel_direct = rel_fourier = None
@@ -533,6 +560,7 @@ def main():
             return sum(p.numel() for p in model.parameters())
 
         # A. Direct functional baseline: [x, z] -> V
+        timings.start("comparisons.direct")
         direct_depth = run.get("direct_depth", 3)
         direct_hidden = run.get("direct_hidden", run["hidden"])
         direct_epochs = run.get("direct_epochs", run["psi_epochs"])
@@ -564,8 +592,10 @@ def main():
         )
 
         rel_direct = relative_l2(direct, Xd_te, yd_te)
+        timings.stop("comparisons.direct")
 
         # B. Direct Fourier baseline: z -> c_hat -> Psi(x, c_hat)
+        timings.start("comparisons.fourier")
 
         # Use the particles actually available to MDN training.
         # This also respects --single-particle.
@@ -629,6 +659,7 @@ def main():
         )
 
         rel_fourier = relative_l2(psi_fourier, Xf_te, yf_te)
+        timings.stop("comparisons.fourier")
 
         learned_meta = {
             "fourier_target_source": "same_XT_particles_as_MDN",
@@ -651,13 +682,15 @@ def main():
             },
         }
 
-    rel_full = relative_l2(psi, Xin_te, y_te)
+    with timings.stage("evaluation"):
+        rel_full = relative_l2(psi, Xin_te, y_te)
     functional_ref_floor = None
 
     transfer_metrics = {}
     transfer_protocol = {}
 
     if args.transfer_functional:
+        timings.start("comparisons.transfer")
         target_functional = args.transfer_functional
         target_labels = []
 
@@ -725,9 +758,46 @@ def main():
             learned_hist[f"transfer_{name}"] = history
 
             print(f"[transfer {target_functional}] {name}: {100 * error:.2f}%")
+        timings.stop("comparisons.transfer")
 
 
 
+    # ---- inference cost: a new scenario -> features -> MDN -> Psi ---------
+    def answer(F_batch, x_batch, k):
+        with torch.no_grad():
+            ints = mdn_integrals(mdn, F_batch, freqs_t)
+            return psi(attach_integrals(x_batch, ints, k))
+
+    timings.start("inference.measurement")
+    psi.eval()
+    x_te, k_te = xy_te[0], xy_te[2]
+    answer(F_te, x_te, k_te)                       # warm-up, untimed
+    with timings.stage("inference.batched"):
+        answer(F_te, x_te, k_te)
+
+    def answer_one(i):
+        # one scenario end to end, its features included
+        one = benchmark.subset(data, ite[i:i + 1])
+        f_one = build_features(one, run["sig_level"], freqs=freqs_np)
+        f_one = to_t(scaler.transform(f_one).astype(np.float32))
+        return answer(f_one, x_te[i * k_te:(i + 1) * k_te], k_te)
+
+    answer_one(0)                                  # warm-up, untimed
+    latencies = []
+    for _ in range(20):
+        t_one = time.perf_counter()
+        answer_one(0)
+        latencies.append(time.perf_counter() - t_one)
+    n_te = len(ite)
+    timings.set("inference.n_scenarios", n_te)
+    timings.set("inference.k_x_test", int(k_te))
+    timings.set("inference.batched_per_scenario",
+                timings.data["inference"]["batched"] / n_te)
+    timings.set("inference.features_per_scenario", timings.data["features"] / M)
+    timings.set("inference.single_scenario_latency", float(np.median(latencies)))
+    timings.stop("inference.measurement")
+
+    timings.start("evaluation")
     pair = benchmark.independent_target_pair(
         d_te,
         args.functional,
@@ -779,6 +849,8 @@ def main():
             return None
         return float(np.sqrt(max(rel_error ** 2- functional_ref_floor ** 2,0.0)))
 
+    timings.stop("evaluation")
+
     rel_emp_adjusted = noise_adjusted(rel_emp)
     rel_full_adjusted = noise_adjusted(rel_full)
     rel_orc_adjusted = noise_adjusted(rel_orc)
@@ -803,6 +875,7 @@ def main():
         print(f"     {reference_baseline_label:31s}: {pct(rel_orc_adjusted)}")
 
     # ---- figures + metrics ------------------------------------------------
+    timings.start("figures")
     make_figures(outdir, benchmark, d_te, mdn, F_te, hist_mdn, hist_psi,
                  w2_model, w2_floor)
     make_convergence_figure(outdir,hist_mdn,hist_psi)
@@ -817,6 +890,28 @@ def main():
         make_baseline_figure(outdir,benchmark,
             {name: error  for name, error in baseline_errors.items()
                 if error is not None})
+    timings.stop("figures")
+
+    # ---- timings block ----------------------------------------------------
+    n_steps = benchmark.p.n_steps
+    n_ref = int(getattr(benchmark.p, "n_ref", 0))
+    n_eval = (0 if benchmark.has_closed_form else int(run["n_eval_particles"]))
+    timings.set("particle_steps", {
+        "train_cloud": M * N * n_steps,
+        "ref_A": M * n_ref * n_steps,
+        "ref_B": M * n_ref * n_steps,
+        "eval_points": {"train": len(itr_all) * n_eval * n_steps,
+                        "validation": len(iva) * n_eval * n_steps,
+                        "test": len(ite) * n_eval * n_steps}})
+    timings.set("environment", {"start": env_start, "end": environment(),
+                                "simulate_cached": False})
+    for group in ("eval_points", "comparisons"):
+        if group in timings.data:
+            timings.set(f"{group}.total", sum(timings.data[group].values()))
+    timings.finish(["simulate.total", "features", "eval_points.total",
+                    "mdn_train.total", "psi_train", "evaluation",
+                    "comparisons.total", "inference.measurement",
+                    "sweep_kkeep", "figures"])
 
     _f = lambda v: None if v is None else float(v)
     metrics = dict(
@@ -850,7 +945,8 @@ def main():
             train_indices=itr.tolist(),validation_indices=iva.tolist(),test_indices=ite.tolist()),
         rel_l2_empirical=_f(rel_emp), rel_l2_oracle=_f(rel_orc),
         sweep_kkeep=sweep_results,
-        runtime_sec=round(time.time() - t0, 1),
+        runtime_sec=round(timings.data["total"], 1),
+        timings=timings.data,
         reference_baseline_label=reference_baseline_label,
         functional_reference_floor=(None if functional_ref_floor is None else float(functional_ref_floor)),
         rel_l2_empirical_noise_adjusted=(None if rel_emp_adjusted is None else float(rel_emp_adjusted)),
