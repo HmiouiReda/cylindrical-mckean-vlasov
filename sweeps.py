@@ -32,6 +32,7 @@ CLI_FLAG = {
     "psi_depth": "--psi-depth",
     "lr": "--lr",
     "sig_level": "--sig-level",
+    "hidden": "--hidden",
 }
 
 
@@ -112,7 +113,9 @@ def main():
             "parameter": args.parameter,
             "value": float(value),
             "mdn_val_nll": metrics["mdn_val_nll"],
+            "w2_mdn_val_mean": metrics["w2_mdn_val_mean"],
             "w2_mdn_mean": metrics["w2_mdn_mean"],
+            "rel_l2_val": metrics["rel_l2_val"],
             "rel_l2_full": metrics["rel_l2_full"],
             "runtime_sec": metrics["runtime_sec"],
             "run_dir": str(run_dir),
