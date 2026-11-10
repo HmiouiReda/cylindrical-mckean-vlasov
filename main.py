@@ -39,8 +39,8 @@ from evaluate import (make_baseline_figure,make_convergence_figure,
 
 # Global defaults; per-benchmark values live in configs/<benchmark>.json.
 DEFAULT_RUN = {"M": 4000,"N": 200,"sig_level": 2,"n_fourier": 4,
-    "J": 5,"k_keep": 64,"mdn_depth": 2,"psi_depth": 2,"mdn_epochs": 400,
-    "psi_epochs": 350,"hidden": 128,"S_quant": 2048,"batch": 256,"lr": 1e-3,
+    "J": 8,"k_keep": 64,"mdn_depth": 4,"psi_depth": 2,"mdn_epochs": 400,
+    "psi_epochs": 350,"hidden": 256,"S_quant": 2048,"batch": 256,"lr": 1e-3,
     "k_x": 16, "k_x_test": 200, "n_eval_particles": 2000,"curve_every": 10,
     "curve_scenarios": 128,"curve_quantiles": 256}
 

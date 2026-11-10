@@ -4,8 +4,8 @@
     "m0_range": [-1.0, 1.0], "s0_range": [0.2, 0.6], "n_ref": 2000
   },
   "run": {
-    "M": 4000, "N": 200, "sig_level": 3, "J": 5, "k_keep": 64,
-    "mdn_epochs": 400, "psi_epochs": 350, "hidden": 128,
+    "M": 4000, "N": 200, "sig_level": 3, "J": 8, "n_fourier": 8, "k_keep": 64,
+    "mdn_epochs": 400, "psi_epochs": 350, "hidden": 256,
     "S_quant": 2048, "batch": 256, "lr": 0.001, "k_x": 16
   },
   "run_quick": {
