@@ -67,6 +67,12 @@ def get_args():
     p.add_argument("--psi-depth",type=int,default=0,
         help="number of hidden layers in the cylindrical network Psi",)
     p.add_argument("--lr",type=float,default=0.0,help="learning-rate override")
+    p.add_argument("--hidden", type=int, default=0,
+                   help="hidden width of both the MDN and Psi")
+    p.add_argument("--train-seed", type=int, default=None,
+                   help="seed for network init and batch order only; data, "
+                        "split and evaluation points stay on --seed "
+                        "(default: --seed)")
     p.add_argument("--kkeep", type=int, default=0,
                 help="particles per scenario used in the NLL "
                     "(gradient variance only)")
@@ -134,7 +140,8 @@ def load_config(args):
             (bench if k in bench_fields else run)[k] = v
     for cli, key in [("M", "M"),("N", "N"),("J", "J"),("kkeep", "k_keep"),("sig_level", "sig_level"),
                     ("n_fourier", "n_fourier"),("mdn_depth", "mdn_depth"),("psi_depth", "psi_depth"),
-                    ("mdn_epochs", "mdn_epochs"),("psi_epochs", "psi_epochs"),("lr", "lr"),]:
+                    ("mdn_epochs", "mdn_epochs"),("psi_epochs", "psi_epochs"),("lr", "lr"),
+                    ("hidden", "hidden"),]:
         v = getattr(args, cli)
         if v:
             run[key] = v
@@ -209,7 +216,8 @@ def main():
     #torch.set_num_threads(2)   # small tensors => limit CPU contention
 
     rng = np.random.default_rng(args.seed)
-    torch.manual_seed(args.seed)
+    train_seed = args.seed if args.train_seed is None else args.train_seed
+    torch.manual_seed(train_seed)
 
     print("=" * 72)
     print(f"Benchmark: {benchmark.pretty}  ({args.benchmark})")
@@ -402,7 +410,7 @@ def main():
 
     with timings.stage("mdn_train.total"):
         hist_mdn, best_nll = train_mdn(mdn,F_tr,X_tr,F_va,X_va,epochs=run["mdn_epochs"],
-            batch_size=run["batch"],lr=run["lr"],k_keep=run["k_keep"],seed=args.seed,
+            batch_size=run["batch"],lr=run["lr"],k_keep=run["k_keep"],seed=train_seed,
             eval_error_fn=validation_distribution_error,eval_every=run["curve_every"])
     mdn.eval()
     floor = benchmark.entropy_floor(data)
@@ -533,7 +541,7 @@ def main():
                     depth=run["psi_depth"],x_dim=benchmark.d)
         hist_psi, _ = train_regressor(psi, Xin_tr, y_tr, Xin_va, y_va,
                                       epochs=run["psi_epochs"], batch_size=1024,
-                                      lr=run["lr"], seed=args.seed)
+                                      lr=run["lr"], seed=train_seed)
 
     # ---- measure-representation comparisons for V-hat ------------------------
     # The regression target is unchanged. The variants differ only through the
@@ -724,6 +732,9 @@ def main():
 
     with timings.stage("evaluation"):
         rel_full = relative_l2(psi, Xin_te, y_te)
+        # validation twins of the test numbers, for choosing hyperparameters
+        rel_val = relative_l2(psi, Xin_va, y_va)
+        w2_val = model_w2(mdn, F_va, d_va)
     functional_ref_floor = None
 
     transfer_metrics = {}
@@ -956,7 +967,8 @@ def main():
     _f = lambda v: None if v is None else float(v)
     metrics = dict(
         benchmark=args.benchmark,
-        config=dict(**run, seed=args.seed, functional=args.functional,
+        config=dict(**run, seed=args.seed, train_seed=train_seed,
+                    functional=args.functional,
                     w2_metric=("sliced" if benchmark.d == 2 else "quantile"),
                     single_particle=args.single_particle,
                     empirical_targets=args.empirical_targets,
@@ -977,6 +989,8 @@ def main():
         mdn_beats_floor=bool(beats),
         reference_resolution=(float(ref_res) if ref_res is not None else None),
         rel_l2_full=float(rel_full),
+        rel_l2_val=float(rel_val),
+        w2_mdn_val_mean=float(w2_val.mean()),
         rel_l2_direct=_f(rel_direct),
         rel_l2_fourier=_f(rel_fourier),
         learned_baselines=learned_meta,
