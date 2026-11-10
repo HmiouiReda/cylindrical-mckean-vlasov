@@ -1,0 +1,11 @@
+# task 3 runs for run_task10.sh, stage R (reda's learned baselines)
+#
+# one run per line: a name, then main.py arguments. run_task10.sh adds
+# --sim-cache and --outdir; output goes to outputs/task10/runs/reda__<name>/.
+# blank lines and text after # are ignored. an empty file skips the stage.
+#
+# keep the frozen configuration: no hyperparameter flags. runs with the same
+# benchmark, seed, M and N as the main runs reuse their simulation (a few
+# minutes each); another M or N simulates from scratch.
+#
+# format:  <name> --benchmark <b> --seed <s> <flags>
