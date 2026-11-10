@@ -18,6 +18,7 @@ import json
 import time
 
 from timing import Timings, environment
+from sim_cache import SimCache, cache_key
 from pathlib import Path
 import copy
 
@@ -121,6 +122,10 @@ def get_args():
                 help="Optional second functional, with frozen representations")
     p.add_argument("--transfer-fraction",type=float,default=1.0,
                 help="Fraction of training scenarios labelled for the new functional")
+    p.add_argument("--sim-cache", type=str, default="", metavar="DIR",
+                   help="reuse the simulation and evaluation points of an "
+                        "earlier run with the same benchmark, params, M, N, "
+                        "seed and evaluation sizes; write them on a miss")
     p.add_argument("--save-model", type=int, nargs="?", const=100, default=0,
                 metavar="K",
                 help="save the MDN and the first K test and train scenarios "
@@ -253,12 +258,30 @@ def main():
         return
 
     # ---- simulation -------------------------------------------------------
+    cache, cached = None, None
+    if args.sim_cache:
+        key = cache_key(args.benchmark, dataclasses.asdict(benchmark.p), M, N,
+                        args.seed, run["k_x"], run["k_x_test"],
+                        run["n_eval_particles"])
+        cache = SimCache(args.sim_cache, key, label=f"{args.benchmark}_s{args.seed}")
     with timings.stage("simulate.total"):
-        data = benchmark.simulate(M, N, rng)
-    # per-system split from inside simulate; one-system benchmarks have none
+        cached = cache.load() if cache else None
+        if cached is None:
+            data = benchmark.simulate(M, N, rng)
+            # the split draws from rng next; a cached run must see this state
+            rng_after_sim = copy.deepcopy(rng.bit_generator.state)
+        else:
+            data = cached["data"]
+            rng.bit_generator.state = cached["rng_after_sim"]
+    if cache:
+        print(f"[sim-cache] {'hit' if cached else 'miss'}: {cache.path}")
+    # per-system split from inside simulate; one-system benchmarks have none.
+    # on a cache hit simulate.total is the load time and the parts are the
+    # seconds of the original simulation
     sim_seconds = data.get("sim_seconds")
     if sim_seconds is None:
-        timings.set("simulate.train_cloud", timings.data["simulate"]["total"])
+        if cached is None:
+            timings.set("simulate.train_cloud", timings.data["simulate"]["total"])
     else:
         for key in ("train_cloud", "ref_A", "ref_B"):
             timings.set(f"simulate.{key}", sim_seconds[key])
@@ -469,13 +492,21 @@ def main():
     # Separate random streams for evaluation states in each split.
     eval_seeds = np.random.SeedSequence([args.seed, 15]).spawn(3)
 
-    def shared_xy(dd, kx, eval_seed):
+    new_x_eval = {}
+
+    def shared_xy(dd, kx, eval_seed, split):
         if kx <= 0:
             raise ValueError("The number of evaluation points must be positive")
         rng_x = np.random.default_rng(eval_seed)
-        x_eval = benchmark.sample_evaluation_points(
-            dd, kx, rng_x, n_particles=run["n_eval_particles"]
-        )
+        if cached is not None:
+            x_eval = cached["x_eval"][split]["x"]
+            rng_x.bit_generator.state = cached["x_eval"][split]["rng_after"]
+        else:
+            x_eval = benchmark.sample_evaluation_points(
+                dd, kx, rng_x, n_particles=run["n_eval_particles"]
+            )
+            new_x_eval[split] = dict(
+                x=x_eval, rng_after=copy.deepcopy(rng_x.bit_generator.state))
         expected_shape = (len(dd["XT"]), kx) + dd["XT"].shape[2:]
         if x_eval.shape != expected_shape or not np.isfinite(x_eval).all():
             raise ValueError("Invalid independent evaluation points")
@@ -508,16 +539,20 @@ def main():
     d_tr_all = benchmark.subset(data, itr_all)
 
     with timings.stage("eval_points.train"):
-        x_tr_all, y_tr_all, k_tr = shared_xy(d_tr_all,run["k_x"],eval_seeds[0])
+        x_tr_all, y_tr_all, k_tr = shared_xy(d_tr_all,run["k_x"],eval_seeds[0],"train")
 
     # Rows are ordered scenario by scenario, with k_tr points per scenario.
     n_train_rows = len(itr) * k_tr
     xy_tr = (x_tr_all[:n_train_rows],y_tr_all[:n_train_rows],k_tr,)
 
     with timings.stage("eval_points.validation"):
-        xy_va = shared_xy(d_va, run["k_x"], eval_seeds[1])
+        xy_va = shared_xy(d_va, run["k_x"], eval_seeds[1], "validation")
     with timings.stage("eval_points.test"):
-        xy_te = shared_xy(d_te, run["k_x_test"], eval_seeds[2])
+        xy_te = shared_xy(d_te, run["k_x_test"], eval_seeds[2], "test")
+    if cache is not None and cached is None:
+        with timings.stage("sim_cache_write"):
+            cache.save(dict(data=data, rng_after_sim=rng_after_sim,
+                            x_eval=new_x_eval))
 
     def attach_three(ints_tr, ints_va, ints_te):
         datasets = []
@@ -955,11 +990,11 @@ def main():
                         "validation": len(iva) * n_eval * n_steps,
                         "test": len(ite) * n_eval * n_steps}})
     timings.set("environment", {"start": env_start, "end": environment(),
-                                "simulate_cached": False})
+                                "simulate_cached": cached is not None})
     for group in ("eval_points", "comparisons"):
         if group in timings.data:
             timings.set(f"{group}.total", sum(timings.data[group].values()))
-    timings.finish(["simulate.total", "features", "eval_points.total",
+    timings.finish(["simulate.total", "features", "eval_points.total", "sim_cache_write",
                     "mdn_train.total", "save_model", "psi_train", "evaluation",
                     "comparisons.total", "inference.measurement",
                     "sweep_kkeep", "figures"])
