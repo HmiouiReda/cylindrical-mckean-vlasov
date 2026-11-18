@@ -157,21 +157,44 @@ def tabular(cols, head, rows) -> str:
 # cost (task 8): seed-0 moments runs, run alone, cache misses
 # ---------------------------------------------------------------------------
 def accuracy_matched(runs, b, es_new):
-    """N' at which a plug-in cloud matches the MDN's W2, assuming N^(-1/2)"""
+    """N' at which a plug-in cloud matches the MDN's W2, and a bound flag.
+
+    particle benchmarks: read off the measured plug-in errors (200, 800, 2000,
+    8000 particles vs H), interpolated in log-log between the two sizes that
+    bracket the MDN's error; no assumed rate. flag ">" when the MDN beats even
+    the largest cloud (N' is then a lower bound), "<" when it is worse than
+    the smallest. OU family: one measured size only (N=200 vs the exact law),
+    so N^(-1/2) from there (the rate is measured on ou, W2 ~ 0.767 N^(-1/2))
+    """
     if b in PARTICLE:
         es = es_new.get(b)
         if not es:
-            return None
-        cs = [es[k]["bias_rms"] * math.sqrt(int(k.split("_")[1]))
-              for k in es if k.startswith("plugin_")]
+            return None, None
+        pts = sorted((int(k.split("_")[1]), es[k]["bias_rms"])
+                     for k in es if k.startswith("plugin_"))
         target = es["mdn"]["vs_H"]["bias_rms"]
-        return (float(np.mean(cs)) / target) ** 2 if cs and target > 0 else None
+        if not pts or target <= 0:
+            return None, None
+        if target <= pts[-1][1]:
+            return float(pts[-1][0]), ">"
+        if target >= pts[0][1]:
+            return float(pts[0][0]), "<"
+        for (n1, e1), (n2, e2) in zip(pts, pts[1:]):
+            if e2 <= target <= e1:
+                t = (math.log(e1) - math.log(target)) / (math.log(e1) - math.log(e2))
+                return float(math.exp(math.log(n1) + t * (math.log(n2) - math.log(n1)))), None
+        # errors not decreasing in N around the target
+        return None, None
     w2 = metric(runs, f"{b}__moments__s0", "w2_mdn_mean")
     floor = metric(runs, f"{b}__moments__s0", "w2_floor_mean")
     n = metric(runs, f"{b}__moments__s0", "config.N")
     if not (w2 and floor and n):
-        return None
-    return (floor * math.sqrt(n) / w2) ** 2
+        return None, None
+    return (floor * math.sqrt(n) / w2) ** 2, None
+
+
+def matched_text(n, bound):
+    return "--" if n is None else f"{bound or ''}{n:.0f}"
 
 
 def cost(runs, es_new):
@@ -208,7 +231,7 @@ def cost(runs, es_new):
         else:
             rate = train_cloud / steps["train_cloud"]
         n_steps = m["config"]["benchmark_params"]["n_steps"]
-        n_match = accuracy_matched(runs, b, es_new)
+        n_match, bound = accuracy_matched(runs, b, es_new)
         be = {}
         for label, n in (("200", 200), ("2000", 2000), ("matched", n_match)):
             if n is None:
@@ -221,7 +244,7 @@ def cost(runs, es_new):
                          batched_per_scenario=g(inf, "batched_per_scenario"),
                          single_scenario_latency=latency, upfront=upfront,
                          us_per_particle_step=1e6 * rate, n_steps=n_steps,
-                         n_matched=n_match, breakeven_200=be["200"],
+                         n_matched=n_match, n_matched_bound=bound or "", breakeven_200=be["200"],
                          breakeven_2000=be["2000"], breakeven_matched=be["matched"],
                          total=float(t.get("total", 0.0))))
 
@@ -232,6 +255,13 @@ def cost(runs, es_new):
             return r"$\infty$"
         return fmt.format(x)
 
+    def matched_cell(r):
+        # a lower bound on N' is an upper bound on the break-even
+        flip = {">": "<", "<": ">"}.get(r["n_matched_bound"], "")
+        pre = (lambda c: f"${c}$" if c else "")
+        return (f"{pre(r['n_matched_bound'])}{num(r['n_matched'], '{:,.0f}')}: "
+                f"{pre(flip)}{num(r['breakeven_matched'], '{:,.0f}')}")
+
     for r in rows:
         sim = (f"{num(r['train_cloud'])} / {num(r['ref_A'] or None)} / "
                f"{num(r['ref_B'] or None)} / {num(r['system_C'] or None)}")
@@ -239,7 +269,7 @@ def cost(runs, es_new):
                    f"{num(r['psi_train'])} & {num(1e3 * r['single_scenario_latency'], '{:.2f}')} & "
                    f"{num(r['upfront'])} & {num(r['breakeven_200'], '{:,.0f}')} & "
                    f"{num(r['breakeven_2000'], '{:,.0f}')} & "
-                   f"{num(r['n_matched'], '{:,.0f}')}: {num(r['breakeven_matched'], '{:,.0f}')}"
+                   + matched_cell(r)
                    + r" \\")
     head = (r"Benchmark & Simulation (s): train / $A$ / $B$ / $C$ & MDN (s) & $\Psi$ (s) & "
             r"Inference (ms) & Upfront (s) & $n^\ast_{200}$ & $n^\ast_{2000}$ & "
@@ -417,7 +447,7 @@ def task5_rows(runs, es_new, task5: Path | None) -> list[str]:
                  f"(old {f(o, 'vs_reference_test', 'w2_mean')}), train "
                  f"{f(m, 'vs_reference_train', 'w2_mean')} (old {f(o, 'vs_reference_train', 'w2_mean')}); "
                  f"reference vs H error {f(es, 'reference', 'error_rms')}; "
-                 f"accuracy-matched N' {accuracy_matched(runs, b, es_new) or float('nan'):.0f}")
+                 f"accuracy-matched N' {matched_text(*accuracy_matched(runs, b, es_new))}")
     L.append("")
     base = "double_well__moments__s0"
     def run_line(name, label):
