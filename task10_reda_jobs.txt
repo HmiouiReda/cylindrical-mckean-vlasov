@@ -9,3 +9,84 @@
 # minutes each); another M or N simulates from scratch.
 #
 # format:  <name> --benchmark <b> --seed <s> <flags>
+
+# accuracy: the main-table runs again with the learned baselines, same
+# benchmark, functional and seed, so every simulation is a cache hit
+
+lb__kuramoto__moments__s0 --benchmark kuramoto --functional moments --seed 0 --baselines full --learned-baselines
+lb__kuramoto__moments__s1 --benchmark kuramoto --functional moments --seed 1 --baselines full --learned-baselines
+lb__kuramoto__moments__s2 --benchmark kuramoto --functional moments --seed 2 --baselines full --learned-baselines
+lb__kuramoto__moments__s3 --benchmark kuramoto --functional moments --seed 3 --baselines full --learned-baselines
+lb__kuramoto__moments__s4 --benchmark kuramoto --functional moments --seed 4 --baselines full --learned-baselines
+lb__double_well__moments__s0 --benchmark double_well --functional moments --seed 0 --baselines full --learned-baselines
+lb__double_well__moments__s1 --benchmark double_well --functional moments --seed 1 --baselines full --learned-baselines
+lb__double_well__moments__s2 --benchmark double_well --functional moments --seed 2 --baselines full --learned-baselines
+lb__double_well__moments__s3 --benchmark double_well --functional moments --seed 3 --baselines full --learned-baselines
+lb__double_well__moments__s4 --benchmark double_well --functional moments --seed 4 --baselines full --learned-baselines
+lb__multiplicative__moments__s0 --benchmark multiplicative --functional moments --seed 0 --baselines full --learned-baselines
+lb__multiplicative__moments__s1 --benchmark multiplicative --functional moments --seed 1 --baselines full --learned-baselines
+lb__multiplicative__moments__s2 --benchmark multiplicative --functional moments --seed 2 --baselines full --learned-baselines
+lb__multiplicative__moments__s3 --benchmark multiplicative --functional moments --seed 3 --baselines full --learned-baselines
+lb__multiplicative__moments__s4 --benchmark multiplicative --functional moments --seed 4 --baselines full --learned-baselines
+lb__ou_gmm__moments__s0 --benchmark ou_gmm --functional moments --seed 0 --baselines full --learned-baselines
+lb__ou_gmm__moments__s1 --benchmark ou_gmm --functional moments --seed 1 --baselines full --learned-baselines
+lb__ou_gmm__moments__s2 --benchmark ou_gmm --functional moments --seed 2 --baselines full --learned-baselines
+lb__ou_gmm__moments__s3 --benchmark ou_gmm --functional moments --seed 3 --baselines full --learned-baselines
+lb__ou_gmm__moments__s4 --benchmark ou_gmm --functional moments --seed 4 --baselines full --learned-baselines
+lb__ou_uniform__moments__s0 --benchmark ou_uniform --functional moments --seed 0 --baselines full --learned-baselines
+lb__ou_uniform__moments__s1 --benchmark ou_uniform --functional moments --seed 1 --baselines full --learned-baselines
+lb__ou_uniform__moments__s2 --benchmark ou_uniform --functional moments --seed 2 --baselines full --learned-baselines
+lb__ou_uniform__moments__s3 --benchmark ou_uniform --functional moments --seed 3 --baselines full --learned-baselines
+lb__ou_uniform__moments__s4 --benchmark ou_uniform --functional moments --seed 4 --baselines full --learned-baselines
+lb__ou__moments__s0 --benchmark ou --functional moments --seed 0 --baselines full --learned-baselines
+lb__ou__moments__s1 --benchmark ou --functional moments --seed 1 --baselines full --learned-baselines
+lb__ou__moments__s2 --benchmark ou --functional moments --seed 2 --baselines full --learned-baselines
+lb__ou__moments__s3 --benchmark ou --functional moments --seed 3 --baselines full --learned-baselines
+lb__ou__moments__s4 --benchmark ou --functional moments --seed 4 --baselines full --learned-baselines
+lb__ou2d__moments__s0 --benchmark ou2d --functional moments --seed 0 --baselines full --learned-baselines
+lb__ou2d__moments__s1 --benchmark ou2d --functional moments --seed 1 --baselines full --learned-baselines
+lb__ou2d__moments__s2 --benchmark ou2d --functional moments --seed 2 --baselines full --learned-baselines
+lb__ou2d__moments__s3 --benchmark ou2d --functional moments --seed 3 --baselines full --learned-baselines
+lb__ou2d__moments__s4 --benchmark ou2d --functional moments --seed 4 --baselines full --learned-baselines
+
+lb__kuramoto__order__s0 --benchmark kuramoto --functional order --seed 0 --baselines full --learned-baselines
+lb__kuramoto__order__s1 --benchmark kuramoto --functional order --seed 1 --baselines full --learned-baselines
+lb__kuramoto__order__s2 --benchmark kuramoto --functional order --seed 2 --baselines full --learned-baselines
+lb__kuramoto__order__s3 --benchmark kuramoto --functional order --seed 3 --baselines full --learned-baselines
+lb__kuramoto__order__s4 --benchmark kuramoto --functional order --seed 4 --baselines full --learned-baselines
+lb__double_well__order__s0 --benchmark double_well --functional order --seed 0 --baselines full --learned-baselines
+lb__double_well__order__s1 --benchmark double_well --functional order --seed 1 --baselines full --learned-baselines
+lb__double_well__order__s2 --benchmark double_well --functional order --seed 2 --baselines full --learned-baselines
+lb__double_well__order__s3 --benchmark double_well --functional order --seed 3 --baselines full --learned-baselines
+lb__double_well__order__s4 --benchmark double_well --functional order --seed 4 --baselines full --learned-baselines
+
+lb__kuramoto__quantile__s0 --benchmark kuramoto --functional quantile --seed 0 --baselines full --learned-baselines
+lb__kuramoto__quantile__s1 --benchmark kuramoto --functional quantile --seed 1 --baselines full --learned-baselines
+lb__kuramoto__quantile__s2 --benchmark kuramoto --functional quantile --seed 2 --baselines full --learned-baselines
+lb__kuramoto__quantile__s3 --benchmark kuramoto --functional quantile --seed 3 --baselines full --learned-baselines
+lb__kuramoto__quantile__s4 --benchmark kuramoto --functional quantile --seed 4 --baselines full --learned-baselines
+lb__double_well__quantile__s0 --benchmark double_well --functional quantile --seed 0 --baselines full --learned-baselines
+lb__double_well__quantile__s1 --benchmark double_well --functional quantile --seed 1 --baselines full --learned-baselines
+lb__double_well__quantile__s2 --benchmark double_well --functional quantile --seed 2 --baselines full --learned-baselines
+lb__double_well__quantile__s3 --benchmark double_well --functional quantile --seed 3 --baselines full --learned-baselines
+lb__double_well__quantile__s4 --benchmark double_well --functional quantile --seed 4 --baselines full --learned-baselines
+lb__multiplicative__quantile__s0 --benchmark multiplicative --functional quantile --seed 0 --baselines full --learned-baselines
+lb__multiplicative__quantile__s1 --benchmark multiplicative --functional quantile --seed 1 --baselines full --learned-baselines
+lb__multiplicative__quantile__s2 --benchmark multiplicative --functional quantile --seed 2 --baselines full --learned-baselines
+lb__multiplicative__quantile__s3 --benchmark multiplicative --functional quantile --seed 3 --baselines full --learned-baselines
+lb__multiplicative__quantile__s4 --benchmark multiplicative --functional quantile --seed 4 --baselines full --learned-baselines
+lb__ou_gmm__quantile__s0 --benchmark ou_gmm --functional quantile --seed 0 --baselines full --learned-baselines
+lb__ou_gmm__quantile__s1 --benchmark ou_gmm --functional quantile --seed 1 --baselines full --learned-baselines
+lb__ou_gmm__quantile__s2 --benchmark ou_gmm --functional quantile --seed 2 --baselines full --learned-baselines
+lb__ou_gmm__quantile__s3 --benchmark ou_gmm --functional quantile --seed 3 --baselines full --learned-baselines
+lb__ou_gmm__quantile__s4 --benchmark ou_gmm --functional quantile --seed 4 --baselines full --learned-baselines
+lb__ou_uniform__quantile__s0 --benchmark ou_uniform --functional quantile --seed 0 --baselines full --learned-baselines
+lb__ou_uniform__quantile__s1 --benchmark ou_uniform --functional quantile --seed 1 --baselines full --learned-baselines
+lb__ou_uniform__quantile__s2 --benchmark ou_uniform --functional quantile --seed 2 --baselines full --learned-baselines
+lb__ou_uniform__quantile__s3 --benchmark ou_uniform --functional quantile --seed 3 --baselines full --learned-baselines
+lb__ou_uniform__quantile__s4 --benchmark ou_uniform --functional quantile --seed 4 --baselines full --learned-baselines
+lb__ou__quantile__s0 --benchmark ou --functional quantile --seed 0 --baselines full --learned-baselines
+lb__ou__quantile__s1 --benchmark ou --functional quantile --seed 1 --baselines full --learned-baselines
+lb__ou__quantile__s2 --benchmark ou --functional quantile --seed 2 --baselines full --learned-baselines
+lb__ou__quantile__s3 --benchmark ou --functional quantile --seed 3 --baselines full --learned-baselines
+lb__ou__quantile__s4 --benchmark ou --functional quantile --seed 4 --baselines full --learned-baselines
