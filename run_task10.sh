@@ -148,14 +148,14 @@ S3=$OUT/jobs/stage3_rest.txt
   for b in $ORDER; do for s in $SEEDS; do main_job "$b" order "$s"; done; done
   for b in $ONE_D; do for s in $SEEDS; do main_job "$b" quantile "$s"; done; done
   echo "task5__ou2d_e1200 nocache --benchmark ou2d --mdn-epochs $E1200"
-  # section 4.7: single observation and the K_keep sweep, five seeds
+  # section 4.9: single observation and the K_keep sweep, five seeds
   for s in $SEEDS; do
     echo "kkeep__ou__s${s} main --benchmark ou --seed $s --sweep-kkeep $KKEEP --baselines none"
   done
   for s in $SEEDS; do
     echo "single__ou__s${s} main --benchmark ou --seed $s --single-particle --baselines emp"
   done
-  # section 4.8: no network, confirms the published numbers
+  # section 4.10: no network, confirms the published numbers
   echo "ito__multiplicative nocache --benchmark multiplicative --ito-strat-check"
   [ $SMOKE = 1 ] && echo "smoke__forced_failure main --benchmark no_such_benchmark"
 } > "$S3"
@@ -177,11 +177,11 @@ fi
 
 # stage 0: the numbers must come from the frozen code
 GUARD="configs main.py benchmarks features.py mdn.py cylindrical.py evaluate.py sim_cache.py error_sources.py"
+# comment and docstring edits pass, code and config changes do not
 # shellcheck disable=SC2086
-if ! git diff --quiet $FROZEN -- $GUARD; then
+if ! "$PY" frozen_guard.py $FROZEN $GUARD > "$OUT/guard.txt"; then
   echo "number-producing files differ from the frozen commit $FROZEN:"
-  # shellcheck disable=SC2086
-  git diff --stat $FROZEN -- $GUARD
+  cat "$OUT/guard.txt"
   if [ $SMOKE = 0 ]; then echo "stopping"; exit 1; fi
   echo "smoke: carrying on"
 fi
