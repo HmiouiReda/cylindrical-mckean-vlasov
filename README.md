@@ -209,28 +209,22 @@ A standard run writes `metrics.json`, `training_history.json`, and benchmark-spe
 
 ## Reproduce the paper campaign
 
-The PowerShell driver executes the complete experiment plan, skips already completed runs unless `-Force` is passed, records a manifest, and aggregates the results at the end.
+The numbers in the paper come from three bash scripts, run on Linux from the repository root with the virtual environment in `.venv`. Each has a `--smoke` mode that runs a tiny version of every stage in minutes, and each logs a failed run and carries on. `run_task10.sh` and `run_sweep.sh` also skip finished runs when started again.
 
-```powershell
-.\run_all.ps1
+| Script | Paper | Time |
+|---|---|---|
+| `run_task10.sh` | Section 4 main results: law and functional tables on five seeds, cost, single observation, K_keep, Itô–Stratonovich check | ~4–6 h |
+| `run_sweep.sh` | Section 4.8, sensitivity sweeps that fixed the configuration | ~1–3 h |
+| `run_task5.sh` | Section 4.7, error sources against the high-resolution system | ~6 h |
+
+```bash
+./run_task10.sh --smoke
+nohup ./run_task10.sh > task10.out 2>&1 &
 ```
 
-Useful options:
+`run_task10.sh` first checks that the code and configs match the frozen commit `f74c3a4` (`frozen_guard.py`; comment and docstring edits are allowed) and stops otherwise. `JOBS` and `THREADS` set the number of parallel runs and torch threads. At the end it runs `task10_tables.py`, which writes the paper tables and figures to `outputs/task10/paper/`.
 
-```powershell
-.\run_all.ps1 -Quick
-.\run_all.ps1 -Force
-.\run_all.ps1 -Clean
-.\run_all.ps1 -StopOnError
-```
-
-To rebuild the summaries and plots from existing raw outputs:
-
-```powershell
-python aggregate_full_results.py --root outputs/paper_full
-```
-
-Aggregation writes CSV, JSON, and figures under `outputs/paper_full/aggregate/` without modifying the raw runs.
+`run_all.ps1` is the PowerShell campaign of the submitted version. It predates the frozen configuration and the Kuramoto benchmark, and it does not reproduce the current paper.
 
 ## Individual experiments
 

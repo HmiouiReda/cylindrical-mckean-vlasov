@@ -1,3 +1,7 @@
+# NOTE: campaign of the submitted version; it predates the frozen configuration
+# (f74c3a4) and the kuramoto benchmark. the current paper comes from
+# run_task10.sh, run_sweep.sh and run_task5.sh (README)
+param(
 param(
     [switch]$Quick,
     [switch]$Force,
