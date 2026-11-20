@@ -65,10 +65,13 @@ class ParticleReferenceBenchmark(Benchmark):
         # Per-scenario W2(A, B).
         w2 = np.sqrt(((A - B) ** 2).mean(axis=1))
 
-        # A and B each have error e.
-        # Their distance is approximately sqrt(2) e.
-        # Pooling A and B reduces e by another sqrt(2).
-        # Therefore pooled error ≈ W2(A,B) / 2.
+        # in 1-d, W2 is the L2 distance between quantile functions
+        # A and B are independent given (mu0, W0) and simulated alike, so their
+        # quantile errors are independent and of equal size e: E W2(A,B)^2 = 2 e^2
+        # pooling averages the two cdfs; to first order its quantile error is the
+        # mean of the two, of size e / sqrt(2) = sqrt(E W2(A,B)^2) / 2
+        # NOTE: assumes A and B share no bias; mean replaces root mean square
+        # (paper, subsection "leakage free simulation and reference design")
         return float(w2.mean() / 2.0)
 
 
