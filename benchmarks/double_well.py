@@ -5,15 +5,14 @@ NONLINEAR benchmark, no closed form.
            + sigma dB_t + sigma0 dW0_t,        X_0 ~ N(m0, s0^2).
 
 Validation without a closed form
-N_ref extra particles are simulated with the SAME common-noise path and
-independent idiosyncratic noise.  By conditional propagation of chaos their
-empirical law converges to mu_T at rate O(N_ref^{-1/2});
-reference_resolution estimates this residual error by a half-sample
-split, so every reported W2 can be read relative to it.
-
-All N + N_ref particles interact through the JOINT empirical mean: both
-sets then carry the same (small) propagation-of-chaos bias and are
-exchangeable samples of the same conditional-law approximation. 
+Three conditionally independent particle systems are simulated per
+scenario: the N-particle training system and two references A and B of
+N_ref particles each.  They share only (m0, s0) and the common-noise path;
+each has its own initial draws, idiosyncratic noise and empirical mean
+field.  By conditional propagation of chaos each reference converges to
+mu_T at rate O(N_ref^{-1/2}).  A supplies the measure inputs of the
+reference baseline, B the regression labels, and reference_resolution
+estimates the error of the pooled cloud from W2(A, B).
 
 Numerics:
 The cubic drift is superlinear, so plain Euler-Maruyama may explode; we use
