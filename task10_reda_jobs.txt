@@ -90,3 +90,76 @@ lb__ou__quantile__s1 --benchmark ou --functional quantile --seed 1 --baselines f
 lb__ou__quantile__s2 --benchmark ou --functional quantile --seed 2 --baselines full --learned-baselines
 lb__ou__quantile__s3 --benchmark ou --functional quantile --seed 3 --baselines full --learned-baselines
 lb__ou__quantile__s4 --benchmark ou --functional quantile --seed 4 --baselines full --learned-baselines
+
+# transfer: moments model, frozen MDN and Fourier representations, new heads for
+# the target functional; target training budget 100% and 25%
+tr__kuramoto__quantile__f100__s0 --benchmark kuramoto --functional moments --seed 0 --baselines full --learned-baselines --transfer-functional quantile --transfer-fraction 1.0
+tr__kuramoto__quantile__f100__s1 --benchmark kuramoto --functional moments --seed 1 --baselines full --learned-baselines --transfer-functional quantile --transfer-fraction 1.0
+tr__kuramoto__quantile__f100__s2 --benchmark kuramoto --functional moments --seed 2 --baselines full --learned-baselines --transfer-functional quantile --transfer-fraction 1.0
+tr__kuramoto__quantile__f100__s3 --benchmark kuramoto --functional moments --seed 3 --baselines full --learned-baselines --transfer-functional quantile --transfer-fraction 1.0
+tr__kuramoto__quantile__f100__s4 --benchmark kuramoto --functional moments --seed 4 --baselines full --learned-baselines --transfer-functional quantile --transfer-fraction 1.0
+tr__kuramoto__quantile__f25__s0 --benchmark kuramoto --functional moments --seed 0 --baselines full --learned-baselines --transfer-functional quantile --transfer-fraction 0.25
+tr__kuramoto__quantile__f25__s1 --benchmark kuramoto --functional moments --seed 1 --baselines full --learned-baselines --transfer-functional quantile --transfer-fraction 0.25
+tr__kuramoto__quantile__f25__s2 --benchmark kuramoto --functional moments --seed 2 --baselines full --learned-baselines --transfer-functional quantile --transfer-fraction 0.25
+tr__kuramoto__quantile__f25__s3 --benchmark kuramoto --functional moments --seed 3 --baselines full --learned-baselines --transfer-functional quantile --transfer-fraction 0.25
+tr__kuramoto__quantile__f25__s4 --benchmark kuramoto --functional moments --seed 4 --baselines full --learned-baselines --transfer-functional quantile --transfer-fraction 0.25
+tr__kuramoto__order__f100__s0 --benchmark kuramoto --functional moments --seed 0 --baselines full --learned-baselines --transfer-functional order --transfer-fraction 1.0
+tr__kuramoto__order__f100__s1 --benchmark kuramoto --functional moments --seed 1 --baselines full --learned-baselines --transfer-functional order --transfer-fraction 1.0
+tr__kuramoto__order__f100__s2 --benchmark kuramoto --functional moments --seed 2 --baselines full --learned-baselines --transfer-functional order --transfer-fraction 1.0
+tr__kuramoto__order__f100__s3 --benchmark kuramoto --functional moments --seed 3 --baselines full --learned-baselines --transfer-functional order --transfer-fraction 1.0
+tr__kuramoto__order__f100__s4 --benchmark kuramoto --functional moments --seed 4 --baselines full --learned-baselines --transfer-functional order --transfer-fraction 1.0
+tr__kuramoto__order__f25__s0 --benchmark kuramoto --functional moments --seed 0 --baselines full --learned-baselines --transfer-functional order --transfer-fraction 0.25
+tr__kuramoto__order__f25__s1 --benchmark kuramoto --functional moments --seed 1 --baselines full --learned-baselines --transfer-functional order --transfer-fraction 0.25
+tr__kuramoto__order__f25__s2 --benchmark kuramoto --functional moments --seed 2 --baselines full --learned-baselines --transfer-functional order --transfer-fraction 0.25
+tr__kuramoto__order__f25__s3 --benchmark kuramoto --functional moments --seed 3 --baselines full --learned-baselines --transfer-functional order --transfer-fraction 0.25
+tr__kuramoto__order__f25__s4 --benchmark kuramoto --functional moments --seed 4 --baselines full --learned-baselines --transfer-functional order --transfer-fraction 0.25
+tr__double_well__quantile__f100__s0 --benchmark double_well --functional moments --seed 0 --baselines full --learned-baselines --transfer-functional quantile --transfer-fraction 1.0
+tr__double_well__quantile__f100__s1 --benchmark double_well --functional moments --seed 1 --baselines full --learned-baselines --transfer-functional quantile --transfer-fraction 1.0
+tr__double_well__quantile__f100__s2 --benchmark double_well --functional moments --seed 2 --baselines full --learned-baselines --transfer-functional quantile --transfer-fraction 1.0
+tr__double_well__quantile__f100__s3 --benchmark double_well --functional moments --seed 3 --baselines full --learned-baselines --transfer-functional quantile --transfer-fraction 1.0
+tr__double_well__quantile__f100__s4 --benchmark double_well --functional moments --seed 4 --baselines full --learned-baselines --transfer-functional quantile --transfer-fraction 1.0
+tr__double_well__quantile__f25__s0 --benchmark double_well --functional moments --seed 0 --baselines full --learned-baselines --transfer-functional quantile --transfer-fraction 0.25
+tr__double_well__quantile__f25__s1 --benchmark double_well --functional moments --seed 1 --baselines full --learned-baselines --transfer-functional quantile --transfer-fraction 0.25
+tr__double_well__quantile__f25__s2 --benchmark double_well --functional moments --seed 2 --baselines full --learned-baselines --transfer-functional quantile --transfer-fraction 0.25
+tr__double_well__quantile__f25__s3 --benchmark double_well --functional moments --seed 3 --baselines full --learned-baselines --transfer-functional quantile --transfer-fraction 0.25
+tr__double_well__quantile__f25__s4 --benchmark double_well --functional moments --seed 4 --baselines full --learned-baselines --transfer-functional quantile --transfer-fraction 0.25
+tr__ou_gmm__quantile__f100__s0 --benchmark ou_gmm --functional moments --seed 0 --baselines full --learned-baselines --transfer-functional quantile --transfer-fraction 1.0
+tr__ou_gmm__quantile__f100__s1 --benchmark ou_gmm --functional moments --seed 1 --baselines full --learned-baselines --transfer-functional quantile --transfer-fraction 1.0
+tr__ou_gmm__quantile__f100__s2 --benchmark ou_gmm --functional moments --seed 2 --baselines full --learned-baselines --transfer-functional quantile --transfer-fraction 1.0
+tr__ou_gmm__quantile__f100__s3 --benchmark ou_gmm --functional moments --seed 3 --baselines full --learned-baselines --transfer-functional quantile --transfer-fraction 1.0
+tr__ou_gmm__quantile__f100__s4 --benchmark ou_gmm --functional moments --seed 4 --baselines full --learned-baselines --transfer-functional quantile --transfer-fraction 1.0
+tr__ou_gmm__quantile__f25__s0 --benchmark ou_gmm --functional moments --seed 0 --baselines full --learned-baselines --transfer-functional quantile --transfer-fraction 0.25
+tr__ou_gmm__quantile__f25__s1 --benchmark ou_gmm --functional moments --seed 1 --baselines full --learned-baselines --transfer-functional quantile --transfer-fraction 0.25
+tr__ou_gmm__quantile__f25__s2 --benchmark ou_gmm --functional moments --seed 2 --baselines full --learned-baselines --transfer-functional quantile --transfer-fraction 0.25
+tr__ou_gmm__quantile__f25__s3 --benchmark ou_gmm --functional moments --seed 3 --baselines full --learned-baselines --transfer-functional quantile --transfer-fraction 0.25
+tr__ou_gmm__quantile__f25__s4 --benchmark ou_gmm --functional moments --seed 4 --baselines full --learned-baselines --transfer-functional quantile --transfer-fraction 0.25
+
+# sample efficiency: nested subsets of the training scenarios, validation and
+# test fixed; fraction 1.0 is the lb__ runs above
+se__kuramoto__f50__s0 --benchmark kuramoto --functional moments --seed 0 --baselines full --learned-baselines --train-fraction 0.5
+se__kuramoto__f50__s1 --benchmark kuramoto --functional moments --seed 1 --baselines full --learned-baselines --train-fraction 0.5
+se__kuramoto__f50__s2 --benchmark kuramoto --functional moments --seed 2 --baselines full --learned-baselines --train-fraction 0.5
+se__kuramoto__f25__s0 --benchmark kuramoto --functional moments --seed 0 --baselines full --learned-baselines --train-fraction 0.25
+se__kuramoto__f25__s1 --benchmark kuramoto --functional moments --seed 1 --baselines full --learned-baselines --train-fraction 0.25
+se__kuramoto__f25__s2 --benchmark kuramoto --functional moments --seed 2 --baselines full --learned-baselines --train-fraction 0.25
+se__kuramoto__f12__s0 --benchmark kuramoto --functional moments --seed 0 --baselines full --learned-baselines --train-fraction 0.125
+se__kuramoto__f12__s1 --benchmark kuramoto --functional moments --seed 1 --baselines full --learned-baselines --train-fraction 0.125
+se__kuramoto__f12__s2 --benchmark kuramoto --functional moments --seed 2 --baselines full --learned-baselines --train-fraction 0.125
+se__double_well__f50__s0 --benchmark double_well --functional moments --seed 0 --baselines full --learned-baselines --train-fraction 0.5
+se__double_well__f50__s1 --benchmark double_well --functional moments --seed 1 --baselines full --learned-baselines --train-fraction 0.5
+se__double_well__f50__s2 --benchmark double_well --functional moments --seed 2 --baselines full --learned-baselines --train-fraction 0.5
+se__double_well__f25__s0 --benchmark double_well --functional moments --seed 0 --baselines full --learned-baselines --train-fraction 0.25
+se__double_well__f25__s1 --benchmark double_well --functional moments --seed 1 --baselines full --learned-baselines --train-fraction 0.25
+se__double_well__f25__s2 --benchmark double_well --functional moments --seed 2 --baselines full --learned-baselines --train-fraction 0.25
+se__double_well__f12__s0 --benchmark double_well --functional moments --seed 0 --baselines full --learned-baselines --train-fraction 0.125
+se__double_well__f12__s1 --benchmark double_well --functional moments --seed 1 --baselines full --learned-baselines --train-fraction 0.125
+se__double_well__f12__s2 --benchmark double_well --functional moments --seed 2 --baselines full --learned-baselines --train-fraction 0.125
+se__ou_gmm__f50__s0 --benchmark ou_gmm --functional moments --seed 0 --baselines full --learned-baselines --train-fraction 0.5
+se__ou_gmm__f50__s1 --benchmark ou_gmm --functional moments --seed 1 --baselines full --learned-baselines --train-fraction 0.5
+se__ou_gmm__f50__s2 --benchmark ou_gmm --functional moments --seed 2 --baselines full --learned-baselines --train-fraction 0.5
+se__ou_gmm__f25__s0 --benchmark ou_gmm --functional moments --seed 0 --baselines full --learned-baselines --train-fraction 0.25
+se__ou_gmm__f25__s1 --benchmark ou_gmm --functional moments --seed 1 --baselines full --learned-baselines --train-fraction 0.25
+se__ou_gmm__f25__s2 --benchmark ou_gmm --functional moments --seed 2 --baselines full --learned-baselines --train-fraction 0.25
+se__ou_gmm__f12__s0 --benchmark ou_gmm --functional moments --seed 0 --baselines full --learned-baselines --train-fraction 0.125
+se__ou_gmm__f12__s1 --benchmark ou_gmm --functional moments --seed 1 --baselines full --learned-baselines --train-fraction 0.125
+se__ou_gmm__f12__s2 --benchmark ou_gmm --functional moments --seed 2 --baselines full --learned-baselines --train-fraction 0.125
